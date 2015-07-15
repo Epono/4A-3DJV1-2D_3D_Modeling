@@ -1,17 +1,20 @@
-#include <cstdlib>
 #include <GL/glut.h>
-#include <windows.h>
 
+#include <cstdlib>
 #include <vector>
 #include <iostream>
-
 #include <math.h>
+
 #include "utils.h"
 #include "Point.h"
 #include "LineStrip.h"
 
 #define M_PI 3.14
+#define WIDTH 1280
+#define HEIGHT 720
 
+// OLD STUFF
+/////////////////////////////////////////////////////////////////////////////////
 int creationState = waitingForFirstClick;
 
 std::vector<LineStrip*> lines;
@@ -24,231 +27,180 @@ float pas = 20;
 color_rgb dessinColor = color_rgb(1.f, 0.f, 0.f);
 
 Point clicked;
+/////////////////////////////////////////////////////////////////////////////////
 
-int presse = 0;										// Stores if the mouse is dragging
+// Camera management
+/////////////////////////////////////////////////////////////////////////////////
+float zoom3D = 15.0f;
+float zoom2D = 15.0f;
+float rotx3D = 0;
+float roty3D = 0.001f;
+float tx3D = 0;
+float ty3D = 0;
+float tx2D = 0;
+float ty2D = 0;
+int lastx = 0;
+int lasty = 0;
+unsigned char Buttons[3] = {0};
+/////////////////////////////////////////////////////////////////////////////////
 
-/* Functions prototypes */
-void display();										// manages displaying
-void keyboard(unsigned char key, int x, int y);		// manages keyboard inputs
-void keyboardSpecial(int key, int x, int y);		// manages keyboard inputs
-void mouse(int bouton, int etat, int x, int y);		// manages mouse clicks
-void motion(int x, int y);							// manages mouse motions
+// Nurbs
+/////////////////////////////////////////////////////////////////////////////////
+float g_Points[7][3] = {
+	{10, 10, 0},
+	{5, 10, 2},
+	{-5, 5, 0},
+	{-10, 5, -2},
+	{-4, 10, 0},
+	{-4, 5, 2},
+	{-8, 1, 0}
+};
 
-void drawWindow();									// draws the window (algorithm of my bite)
-void createMenu();
-void menu(int opt);
-void colorPicking(int option);
-void setPolygonColor(float colors[3], float r, float g, float b);
-void write();										// Writes on the top left what's happening
+float g_Knots[] = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 4.0f, 4.0f, 4.0f};
+unsigned int g_num_cvs = 7;
+unsigned int g_degree = 3;
+unsigned int g_order = g_degree + 1;
+unsigned int g_num_knots = g_num_cvs + g_order;
 
-Point* DC(const std::vector<Point>& p, float t);
-void drawBezier(int p, LineStrip& line);
-Point drawBezier(Point A, Point B, Point C, Point D, double t);
-void drawLine(Point& p1, Point& p2);
-void drawCurve(LineStrip& line, int lineSize);
+unsigned int LOD = 20;
+/////////////////////////////////////////////////////////////////////////////////
 
-void translate(int xOffset, int yOffset);
-void scale(float scaleX, float scaleY);
-void rotate(float angle);
+bool is3DMode = true;
 
 int main(int argc, char **argv) {
-	//Glut and Window Initialization
-	glutInit(&argc, argv);										// Initializes Glut
-	glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);	// RGB display mode, with depth
-	glutInitWindowSize(1280, 720);								// Sets window's dimensions
-	glutInitWindowPosition(100, 100);							// Positions the window
-	glutCreateWindow("FunStuffWithOpenGL");						// Title of the window
+	glClearColor(0.0, 0.0, 0.0, 1.0);
+	glColor3f(0.0, 0.0, 0.0);
+	glPointSize(4.0);
 
-	gluOrtho2D(0, 1280, 720, 0);									// 2D orthogonal frame with xMin, xMax, yMin, yMax
+	glutInit(&argc, argv);
+	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH);
+	glutInitWindowSize(WIDTH, HEIGHT);
+	glutInitWindowPosition(100, 100);
+	glutCreateWindow("FunStuffWithOpenGL");
 
-	// OpenGL initialization
-	glClearColor(0.0, 0.0, 0.0, 1.0);		// Background color : black ?
-	glColor3f(0.0, 0.0, 0.0);				// Color : white
-	glPointSize(4.0);						// Point size : 4px
+	//createMenu();
 
-	// Registering of callback functions called by glut
+	reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
+
 	glutDisplayFunc(display);
-	glutKeyboardFunc(keyboard);
-	glutSpecialFunc(keyboardSpecial);
+	glutReshapeFunc(reshape);
 	glutMouseFunc(mouse);
 	glutMotionFunc(motion);
+	glutKeyboardFunc(keyboard);
 
-	currentLine = new LineStrip();
+	glEnable(GL_DEPTH_TEST);
 
-	//glOrtho(-1, 1.0, -1, 1.0, -1.0, 1.0); // il faut le mettre ?
-	createMenu();							// Creates the menu available via right-click
-	glMatrixMode(GL_MODELVIEW);
-
-	glutMainLoop();         // Launches main OpenGL loop, events handlers
-	return 0;				// Should not get here (unless we exit with 'q' ?)
+	glutMainLoop();
 }
 
-Point* DC(const std::vector<Point>& p, float t) {
-	int n = p.size();
-	std::vector<Point> q(n);
-	for(int i = 0; i < n; ++i)
-		q.at(i) = p.at(i);
-	for(int k = 1; k < n; ++k)
-		for(int i = 0; i < n - k; ++i) {
-			q.at(i).setX((1 - t)*q.at(i).getX() + t*q.at(i + 1).getX());
-			q.at(i).setY((1 - t)*q.at(i).getY() + t*q.at(i + 1).getY());
-		}
-	return new Point(q.at(0));
-}
+void reshape(int w, int h) {
+	if(w == 0)
+		h = 1;
 
-void drawBezier(float pas, LineStrip& line) {
-	Point A = line.getPoints().at(0), B;
-	for(float k = 1.f; k <= pas; ++k) {
-		B = *DC(line.getPoints(), k / pas);
-		drawLine(A, B);
-		A = B;
+	if(is3DMode) {
+		glViewport(0, 0, w, h);
+		glMatrixMode(GL_PROJECTION);
+		glLoadIdentity();
+		gluPerspective(45, (float) w / h, 0.1, 100);
+		glMatrixMode(GL_MODELVIEW);
+		glLoadIdentity();
+	}
+	else {
+		//glViewport(0, 0, w, h);
+
+		glMatrixMode(GL_PROJECTION);
+		glLoadIdentity();
+		gluOrtho2D(-w / 2, w / 2, -h / 2, h / 2);
+		glMatrixMode(GL_MODELVIEW);
+		glLoadIdentity();
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		glPushMatrix();
 	}
 }
 
-void drawLine(Point& p1, Point& p2) {
-	glBegin(GL_LINES);
-	glVertex2f(p1.getX(), p1.getY());
-	glVertex2f(p2.getX(), p2.getY());
-	glEnd();
-}
-
-/*
-* Function in charge of refreshing the display of the window
-*/
 void display() {
-	glClear(GL_COLOR_BUFFER_BIT);	// Clears the display
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	write();
+	glLoadIdentity();
 
-	for(auto &l : lines)
-		drawCurve(*l, 2);
-	if(currentLine != nullptr)
-		drawCurve(*currentLine, 2);
+	if(is3DMode) {
+		gluLookAt(1, 10, 26,	//	eye pos
+				  0, 5, 0,		//	aim point
+				  0, 1, 0);		//	up direction
 
-	glutSwapBuffers();				// Double buffer ?
-	glFlush();						// Forces refresh ?
+		glTranslatef(0, 0, -zoom3D);
+		glTranslatef(tx3D, ty3D, 0);
+		glRotatef(rotx3D, 1, 0, 0);
+		glRotatef(roty3D, 0, 1, 0);
+		drawGrid3D();
+	}
+	else {
+		glScalef(zoom2D, zoom2D, zoom2D);
+		glTranslatef(tx2D, ty2D, 0);
+		drawGrid2D();
+	}
+
+	drawNurbsCurveExample();
+
+	glutSwapBuffers();
 }
 
-/*
-* Function in charge of handling mouse events (clicking only, not dragging)
-*/
 void mouse(int button, int state, int x, int y) {
-	clicked = Point(x, y);
-	Point point(x, y);
-	if(currentLine != nullptr) {
-		if(button == GLUT_LEFT_BUTTON && state == GLUT_UP) {
-			presse = 1;
-			switch(creationState) {
-			case pending:
-				printf("Coords clicked (pending state) : (%d, %d)\n", x, y);
-				break;
-			case waitingForFirstClick:
-				currentLine->addPoint(point);
-				creationState++;
-				break;
-			case waitingForNextClick:
-				currentLine->addPoint(point);
-				break;
-			case selectPoint:
-				break;
-			}
+	lastx = x;
+	lasty = y;
+	switch(button) {
+	case GLUT_LEFT_BUTTON:
+		Buttons[0] = ((GLUT_DOWN == state) ? 1 : 0);
+		break;
+	case GLUT_MIDDLE_BUTTON:
+		Buttons[1] = ((GLUT_DOWN == state) ? 1 : 0);
+		break;
+	case GLUT_RIGHT_BUTTON:
+		Buttons[2] = ((GLUT_DOWN == state) ? 1 : 0);
+		break;
+	default:
+		break;
+	}
+
+	glutPostRedisplay();
+}
+
+void motion(int x, int y) {
+	int diffx = x - lastx;
+	int diffy = y - lasty;
+	lastx = x;
+	lasty = y;
+
+	if(Buttons[2]) {
+		if(is3DMode) {
+			zoom3D -= (float) 0.05f * diffy;
 		}
-		if(currentLine->getPoints().size() > 0) {
-			if(button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
-				presse = 0;
-				windowVerticeToMove = -1;
-				std::vector<Point>& points = currentLine->getPoints();
-				if(creationState == selectPoint) {
-					for(unsigned int i = 0; i < points.size(); i++) {
-						float tempX = points.at(i).getX();
-						float tempY = points.at(i).getY();
-						int distance = 10;
-						if(abs(tempX - x) < distance && abs(tempY - y) < distance) {
-							windowVerticeToMove = i;
-							break;
-						}
-					}
+		else {
+			zoom2D += (float) 0.05f * diffy;
+		}
+	}
+	else {
+		if(Buttons[0]) {
+			rotx3D += (float) 0.5f * diffy;
+			roty3D += (float) 0.5f * diffx;
+		}
+		else {
+			if(Buttons[1]) {
+				if(is3DMode) {
+					tx3D += (float) 0.05f * diffx;
+					ty3D -= (float) 0.05f * diffy;
+				}
+				else {
+					tx2D += (float) 0.05f * diffx;
+					ty2D -= (float) 0.05f * diffy;
 				}
 			}
 		}
 	}
 
-	glutPostRedisplay();		// Refresh display
+	glutPostRedisplay();
 }
 
-void motion(int x, int y) {
-	if(creationState == selectPoint) {
-		if(windowVerticeToMove != -1) {
-			std::vector<Point>& points = currentLine->getPoints();
-			points.at(windowVerticeToMove).setX(x);
-			points.at(windowVerticeToMove).setY(y);
-		}
-	}
-	else if(creationState == scaling) {
-		float xOffset = clicked.getX() - x;
-		float yOffset = clicked.getY() - y;
-		scale(1 - (xOffset / 500), 1 + (yOffset / 500));
-		clicked.setX(x);
-		clicked.setY(y);
-	}
-	else if(creationState == rotating) {
-		// OLD WAY
-		//float xOffset = clicked.getX() - x;
-		//float yOffset = clicked.getY() - y;
-		//rotate(0 - (xOffset / 200));
-		//clicked.setX(x);
-		//clicked.setY(y);
-
-		// NEW WAY
-		float sumX = 0;
-		float sumY = 0;
-
-		//Calcul du barycentre pour décaler
-		std::vector<Point>& points = currentLine->getPoints();
-		for(unsigned int i = 0; i < points.size(); i++) {
-			sumX += points.at(i).getX();
-			sumY += points.at(i).getY();
-		}
-
-		Point barycenter = {sumX / points.size(), sumY / points.size()};
-
-		Point a(clicked);
-		Point b(barycenter);
-		Point c(x, y);
-
-		Point ab(b.getX() - a.getX(), b.getY() - a.getY());
-		Point cb(b.getX() - c.getX(), b.getY() - c.getY());
-
-		float dot = (ab.getX() * cb.getX() + ab.getY() * cb.getY()); // dot product
-		float cross = (ab.getX() * cb.getY() - ab.getY() * cb.getX()); // cross product
-
-		float alpha = atan2(cross, dot);
-
-		float angle = floor(alpha * 180. / M_PI + 0.5);
-
-		//std::cout << angle << std::endl;
-
-		rotate(angle * (M_PI / 180));
-
-		clicked.setX(x);
-		clicked.setY(y);
-	}
-	else if(creationState == translating) {
-		float xOffset = clicked.getX() - x;
-		float yOffset = clicked.getY() - y;
-		translate(-xOffset, -yOffset);
-		clicked.setX(x);
-		clicked.setY(y);
-	}
-
-	glutPostRedisplay(); // Rafraichissement de l'affichage
-}
-
-/*
-* Function in charge of handling keyboard events
-* key : key pressed
-* x, y : coordinates of the pointer when the key was pressed ?
-*/
 void keyboard(unsigned char key, int x, int y) {
 	switch(key) {
 	case 'd': // Switch to connected strip lines creation
@@ -299,128 +251,30 @@ void keyboard(unsigned char key, int x, int y) {
 	case 'o':
 		creationState = scaling;
 		break;
-	case '0': // New C0 
-	{
-		if(currentLine->getPoints().size() > 2) {
-			lines.push_back(currentLine);
-			LineStrip* previousLine = lines.back();
-			Point previousPoint = previousLine->getPoints().back();
-			currentLine = new LineStrip();
-			currentLine->addPoint(Point(previousPoint));
+	case '3':
+		if(!is3DMode) {
+			is3DMode = true;
+			reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
+			std::cout << "Going in 3D mode !" << std::endl;
 		}
 		break;
-	}
-	case '1': // New C1 
-	{
-		if(currentLine->getPoints().size() > 2) {
-			lines.push_back(currentLine);
-			LineStrip* previousLine = lines.back();
-			Point previousPoint = previousLine->getPoints().back();
-			Point previousPreviousPoint = previousLine->getPoints().rbegin()[1];
-			Point newPoint(previousPoint.getX() + (previousPoint.getX() - previousPreviousPoint.getX()), previousPoint.getY() + (previousPoint.getY() - previousPreviousPoint.getY()));
-			currentLine = new LineStrip();
-			currentLine->addPoint(Point(previousPoint));
-			currentLine->addPoint(newPoint);
+	case '2':
+		if(is3DMode) {
+			is3DMode = false;
+			reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
+			std::cout << "Going in 2D mode !" << std::endl;
 		}
 		break;
-	}
-	case '2': // New C2 
-	{
-		if(currentLine->getPoints().size() > 2) {
-			lines.push_back(currentLine);
-			LineStrip* previousLine = lines.back();
-			Point previousPoint = previousLine->getPoints().back();
-			Point previousPreviousPoint = previousLine->getPoints().rbegin()[1];
-			Point previousPreviousPreviousPoint = previousLine->getPoints().rbegin()[2];
-			Point newPoint(2 * previousPoint.getX() - previousPreviousPoint.getX(), 2 * previousPoint.getY() - previousPreviousPoint.getY());
-			Point newNewPoint(previousPreviousPreviousPoint.getX() + 2 * (newPoint.getX() - previousPreviousPoint.getX()),
-							  previousPreviousPreviousPoint.getY() + 2 * (newPoint.getY() - previousPreviousPoint.getY()));
-			currentLine = new LineStrip();
-			currentLine->addPoint(Point(previousPoint));
-			currentLine->addPoint(newPoint);
-			currentLine->addPoint(newNewPoint);
-		}
-		break;
-	}
 	case 127:
-		// deletes selected point
-		if(windowVerticeToMove != -1) {
-			std::vector<Point>& points = currentLine->getPoints();
-			points.erase(points.begin() + windowVerticeToMove);
-		}
-		windowVerticeToMove = -1;
+		// Suppr
 		break;
 	case 27:
 		exit(0);
-	case 'q':
-		exit(0);
 	}
 
-	glutPostRedisplay(); // Rafraichissement de l'affichage
+	glutPostRedisplay();
 }
 
-void keyboardSpecial(int key, int x, int y) {
-	int modifier = glutGetModifiers();
-
-	switch(modifier) {
-	case 0: // NONE - Translation
-		switch(key) {
-		case 100: // LEFT
-			translate(-10, 0);
-			break;
-		case 101: // UP
-			translate(0, -10);
-			break;
-		case 102: // RIGHT
-			translate(10, 0);
-			break;
-		case 103: // DOWN
-			translate(0, 10);
-			break;
-		}
-		break;
-	case 1: // SHIFT - Scaling
-		switch(key) {
-		case 100: // LEFT
-			scale(0.9f, 1.0f);
-			break;
-		case 101: // UP
-			scale(1.0f, 1.1f);
-			break;
-		case 102: // RIGHT
-			scale(1.1f, 1.0f);
-			break;
-		case 103: // DOWN
-			scale(1.0f, 0.9f);
-			break;
-		}
-		break;
-	case 2: // CTRL - Rotation
-		switch(key) {
-		case 100: // LEFT
-			rotate(0.05f);
-			break;
-		case 101: // UP
-			rotate(0.05f);
-			break;
-		case 102: // RIGHT
-			rotate(-0.05f);
-			break;
-		case 103: // DOWN
-			rotate(-0.05f);
-			break;
-		}
-		break;
-	case 3: // ALT
-		break;
-	}
-
-	glutPostRedisplay(); // Rafraichissement de l'affichage
-}
-
-/*
-* Creates the menu available via right-click
-*/
 void createMenu() {
 	int mainMenu;
 
@@ -468,149 +322,139 @@ void setPolygonColor(float colors[3], float r, float g, float b) {
 	*(colors + 2) = b;
 }
 
-void drawCurve(LineStrip& line, int lineSize) {
-	glLineWidth(lineSize);
-	glColor3f(1.0f, 0.0f, 0.0f);		// Sets the drawing color
-	if(!hideControlPoints) {
-		// Draws line strip
-		glBegin(GL_LINE_STRIP);
-		for(auto &p : line.getPoints())
-			glVertex2f(p.getX(), p.getY());
-		glEnd();
+void drawGrid3D() {
+	glLineWidth(5.0f);
+	glBegin(GL_LINES);
 
-		// Draws vertices of the connected lines strip
-		glBegin(GL_POINTS);
-		for(auto &p : line.getPoints())
-			glVertex2f(p.getX(), p.getY());
-		glEnd();
+	// Red = x
+	// Green = y
+	// Blue = z
+	glColor3f(1.0, 0.0, 0.0);
+	glVertex3f(0, 0, 0);
+	glVertex3f(5, 0, 0);
+
+	glColor3f(0.0, 1.0, 0.0);
+	glVertex3f(0, 0, 0);
+	glVertex3f(0, 5, 0);
+
+	glColor3f(0.0, 0.0, 1.0);
+	glVertex3f(0, 0, 0);
+	glVertex3f(0, 0, 5);
+	glEnd();
+
+	glLineWidth(1.0f);
+	glBegin(GL_LINES);
+	glColor3f(1.0, 1.0, 1.0);
+	for(int i = -10; i <= 10; ++i) {
+		glVertex3f(i, 0, -10);
+		glVertex3f(i, 0, 10);
+
+		glVertex3f(10, 0, i);
+		glVertex3f(-10, 0, i);
 	}
-	if(line.getPoints().size() > 2) {
-		color_rgb c = line.getColor();
-		glColor3f(c._r, c._g, c._b);		// Sets the drawing color
-		drawBezier(pas, line);
+
+	glEnd();
+}
+
+void drawGrid2D() {
+	glLineWidth(5.0f);
+	glBegin(GL_LINES);
+
+	// Red = x
+	// Green = y
+	glColor3f(1.0, 0.0, 0.0);
+	glVertex3f(0, 0, 0);
+	glVertex3f(5, 0, 0);
+
+	glColor3f(0.0, 1.0, 0.0);
+	glVertex3f(0, 0, 0);
+	glVertex3f(0, 5, 0);
+
+	glEnd();
+
+	glLineWidth(1.0f);
+	glBegin(GL_LINES);
+	glColor3f(1.0, 1.0, 1.0);
+	for(int i = -10; i <= 10; ++i) {
+		glVertex3f(i, -10, 0);
+		glVertex3f(i, 10, 0);
+
+		glVertex3f(10, i, 0);
+		glVertex3f(-10, i, 0);
+	}
+
+	glEnd();
+}
+
+//------------------------------------------------------------	CoxDeBoor()
+//
+float CoxDeBoor(float u, int i, int k, const float* Knots) {
+	if(k == 1) {
+		if(Knots[i] <= u && u <= Knots[i + 1]) {
+			return 1.0f;
+		}
+		return 0.0f;
+	}
+	float Den1 = Knots[i + k - 1] - Knots[i];
+	float Den2 = Knots[i + k] - Knots[i + 1];
+	float Eq1 = 0, Eq2 = 0;
+	if(Den1 > 0) {
+		Eq1 = ((u - Knots[i]) / Den1) * CoxDeBoor(u, i, k - 1, Knots);
+	}
+	if(Den2 > 0) {
+		Eq2 = (Knots[i + k] - u) / Den2 * CoxDeBoor(u, i + 1, k - 1, Knots);
+	}
+	return Eq1 + Eq2;
+}
+
+//------------------------------------------------------------	GetOutpoint()
+//
+void GetOutpoint(float t, float OutPoint[]) {
+
+	// sum the effect of all CV's on the curve at this point to 
+	// get the evaluated curve point
+	// 
+	for(unsigned int i = 0; i != g_num_cvs; ++i) {
+
+		// calculate the effect of this point on the curve
+		float Val = CoxDeBoor(t, i, g_order, g_Knots);
+
+		if(Val > 0.001f) {
+
+			// sum effect of CV on this part of the curve
+			OutPoint[0] += Val * g_Points[i][0];
+			OutPoint[1] += Val * g_Points[i][1];
+			OutPoint[2] += Val * g_Points[i][2];
+		}
 	}
 }
 
-void write() {
-	char* truc;
-	if(creationState == selectPoint) {
-		truc = "Selecting point";
-	}
-	else if(creationState == waitingForFirstClick || creationState == waitingForNextClick) {
-		truc = "Drawing lines";
-	}
-	else {
-		truc = "Unknown action";
-	}
-	glRasterPos2f(5, 20);
+void drawNurbsCurveExample() {
+	// Courbe en elle même
+	glColor3f(1, 1, 0);
+	glBegin(GL_LINE_STRIP);
+	for(int i = 0; i != LOD; ++i) {
 
-	for(int i = 0; truc[i] != '\0'; i++)
-		glutBitmapCharacter(GLUT_BITMAP_9_BY_15, truc[i]);
+		float t = g_Knots[g_num_knots - 1] * i / (float) (LOD - 1);
+
+		if(i == LOD - 1)
+			t -= 0.001f;
+
+		float Outpoint[3] = {0, 0, 0};
+
+		GetOutpoint(t, Outpoint);
+
+		glVertex3fv(Outpoint);
+	}
+	glEnd();
+
+	// Points de contrôle
+	glColor3f(1, 0, 0);
+	glPointSize(3);
+	glBegin(GL_POINTS);
+	for(int i = 0; i != g_num_cvs; ++i) {
+		glVertex3fv(g_Points[i]);
+	}
+	glEnd();
 }
 
-void translate(int xOffset, int yOffset) {
-
-	float x, y;
-
-	float matrix[6] = {
-		1, 0, xOffset,
-		0, 1, yOffset
-	};
-
-	std::vector<Point>& points = currentLine->getPoints();
-	for(unsigned int i = 0; i < points.size(); i++) {
-		x = points.at(i).getX();
-		y = points.at(i).getY();
-
-		points.at(i).setX((x * matrix[0]) + (y * matrix[1]) + (1 * matrix[2]));
-		points.at(i).setY((x * matrix[3]) + (y * matrix[4]) + (1 * matrix[5]));
-	}
-}
-
-void scale(float scaleX, float scaleY) {
-
-	if(scaleX == 0.0f) {
-		scaleX = 1.0f;
-	}
-	if(scaleY == 0.0f) {
-		scaleY = 1.0f;
-	}
-
-	float x, y;
-
-	float matrix[4] = {
-		scaleX, 0,
-		0, scaleY
-	};
-
-	float sumX = 0;
-	float sumY = 0;
-
-	//Calcul du barycentre pour décaler
-	std::vector<Point>& points = currentLine->getPoints();
-	for(unsigned int i = 0; i < points.size(); i++) {
-		sumX += points.at(i).getX();
-		sumY += points.at(i).getY();
-	}
-
-	Point barycenter = {sumX / currentLine->getPoints().size(), sumY / currentLine->getPoints().size()};
-
-	for(unsigned int i = 0; i < points.size(); i++) {
-		// Translate barycenter to origin
-		points.at(i).setX(points.at(i).getX() - barycenter.getX());
-		points.at(i).setY(points.at(i).getY() - barycenter.getY());
-
-		x = points.at(i).getX();
-		y = points.at(i).getY();
-
-		// Scale
-		points.at(i).setX((x * matrix[0]) + (y * matrix[1]));
-		points.at(i).setY((x * matrix[2]) + (y * matrix[3]));
-
-		// Translation back
-		points.at(i).setX(points.at(i).getX() + barycenter.getX());
-		points.at(i).setY(points.at(i).getY() + barycenter.getY());
-	}
-}
-
-void rotate(float angle) {
-
-	float x, y;
-	float cos_angle = cos(angle);
-	float sin_angle = sin(angle);
-
-	float matrix[4] = {
-		cos_angle, -sin_angle,
-		sin_angle, cos_angle
-	};
-
-	float sumX = 0;
-	float sumY = 0;
-
-	//Calcul du barycentre pour décaler
-	std::vector<Point>& points = currentLine->getPoints();
-	for(unsigned int i = 0; i < points.size(); i++) {
-		sumX += points.at(i).getX();
-		sumY += points.at(i).getY();
-	}
-
-	Point barycenter = {sumX / points.size(), sumY / points.size()};
-
-	for(unsigned int i = 0; i < points.size(); i++) {
-
-		// Translate barycenter to origin
-		points.at(i).setX(points.at(i).getX() - barycenter.getX());
-		points.at(i).setY(points.at(i).getY() - barycenter.getY());
-
-		x = points.at(i).getX();
-		y = points.at(i).getY();
-
-		// Rotation around origin
-		points.at(i).setX((x * matrix[0]) + (y * matrix[1]));
-		points.at(i).setY((x * matrix[2]) + (y * matrix[3]));
-
-		// Translation back
-		points.at(i).setX(points.at(i).getX() + barycenter.getX());
-		points.at(i).setY(points.at(i).getY() + barycenter.getY());
-	}
-}

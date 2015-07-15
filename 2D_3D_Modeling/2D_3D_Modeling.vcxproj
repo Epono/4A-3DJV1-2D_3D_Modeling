@@ -18,6 +18,7 @@
   <ItemGroup>
     <ClInclude Include="headers\Line.h" />
     <ClInclude Include="headers\LineStrip.h" />
+    <ClInclude Include="headers\OldStuff.h" />
     <ClInclude Include="headers\Point.h" />
     <ClInclude Include="headers\utils.h" />
   </ItemGroup>
