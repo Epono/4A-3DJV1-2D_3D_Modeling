@@ -11,7 +11,6 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\Line.cpp" />
     <ClCompile Include="src\LineStrip.cpp" />
     <ClCompile Include="src\main.cpp" />
   </ItemGroup>

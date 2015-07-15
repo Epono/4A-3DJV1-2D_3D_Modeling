@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Point.h"
+//#include "Point.h"
 
 /* Functions prototypes */
 void display();										// manages displaying
@@ -13,6 +13,7 @@ void reshape(int w, int h);							// manages window resizing
 void drawGrid2D();
 void drawGrid3D();
 void drawNurbsCurveExample();
+void drawBezier3D();
 
 void createMenu();
 void menu(int opt);

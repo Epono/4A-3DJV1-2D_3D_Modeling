@@ -6,8 +6,8 @@
 #include <math.h>
 
 #include "utils.h"
-#include "Point.h"
-#include "LineStrip.h"
+//#include "Point.h"
+//#include "LineStrip.h"
 
 #define M_PI 3.14
 #define WIDTH 1280
@@ -17,8 +17,8 @@
 /////////////////////////////////////////////////////////////////////////////////
 int creationState = waitingForFirstClick;
 
-std::vector<LineStrip*> lines;
-LineStrip *currentLine = nullptr;
+//std::vector<LineStrip*> lines;
+//LineStrip *currentLine = nullptr;
 
 float windowColor[3] = {0, 0.5f, 0.5f};		// Window color
 int windowVerticeToMove = -1;
@@ -26,7 +26,7 @@ bool hideControlPoints = false;
 float pas = 20;
 color_rgb dessinColor = color_rgb(1.f, 0.f, 0.f);
 
-Point clicked;
+//Point clicked;
 /////////////////////////////////////////////////////////////////////////////////
 
 // Camera management
@@ -65,7 +65,49 @@ unsigned int g_num_knots = g_num_cvs + g_order;
 unsigned int LOD = 20;
 /////////////////////////////////////////////////////////////////////////////////
 
+// Bezier 3D
+/////////////////////////////////////////////////////////////////////////////////
+/// a structure to hold a control point of the surface
+struct Point {
+	float x;
+	float y;
+	float z;
+};
+
+/// 4x4 grid of points that will define the surface
+Point Points[4][4] = {
+	{
+		{10, 0, 10},
+		{5, 0, 10},
+		{-5, 0, 10},
+		{-10, 0, 10}
+	},
+	{
+		{10, 0, 5},
+		{5, 6, 5},
+		{-5, 6, 5},
+		{-10, 0, 5}
+	},
+	{
+		{10, 0, -5},
+		{5, 6, -5},
+		{-5, 6, -5},
+		{-10, 0, -5}
+	},
+	{
+		{10, 0, -10},
+		{5, 0, -10},
+		{-5, 0, -10},
+		{-10, 0, -10}
+	}
+};
+
+// the level of detail of the surface
+//unsigned int LOD = 20;
+/////////////////////////////////////////////////////////////////////////////////
+
 bool is3DMode = true;
+bool displayGrid = true;
 
 int main(int argc, char **argv) {
 	glClearColor(0.0, 0.0, 0.0, 1.0);
@@ -111,6 +153,7 @@ void reshape(int w, int h) {
 		glMatrixMode(GL_PROJECTION);
 		glLoadIdentity();
 		gluOrtho2D(-w / 2, w / 2, -h / 2, h / 2);
+		//glOrtho(-w/2, w/2, -h/2, h/2, -100.0f, 100.0f);
 		glMatrixMode(GL_MODELVIEW);
 		glLoadIdentity();
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -132,15 +175,18 @@ void display() {
 		glTranslatef(tx3D, ty3D, 0);
 		glRotatef(rotx3D, 1, 0, 0);
 		glRotatef(roty3D, 0, 1, 0);
-		drawGrid3D();
+		if(displayGrid) drawGrid3D();
 	}
 	else {
 		glScalef(zoom2D, zoom2D, zoom2D);
 		glTranslatef(tx2D, ty2D, 0);
-		drawGrid2D();
+		//glRotatef(rotx3D, 1, 0, 0);
+		//glRotatef(roty3D, 0, 1, 0);
+		if(displayGrid) drawGrid2D();
 	}
 
 	drawNurbsCurveExample();
+	drawBezier3D();
 
 	glutSwapBuffers();
 }
@@ -214,15 +260,15 @@ void keyboard(unsigned char key, int x, int y) {
 		break;
 	case 'v': // Validates
 		creationState = waitingForFirstClick;
-		if(currentLine != nullptr) {
-			lines.push_back(currentLine);
-			currentLine = new LineStrip();
-		}
+		//if(currentLine != nullptr) {
+		//	lines.push_back(currentLine);
+		//	currentLine = new LineStrip();
+		//}
 		break;
 	case 'c': // Clear the window
 		creationState = waitingForFirstClick;
-		lines.clear();
-		currentLine = new LineStrip();
+		//lines.clear();
+		//currentLine = new LineStrip();
 		break;
 	case 's':
 		// select point
@@ -235,12 +281,16 @@ void keyboard(unsigned char key, int x, int y) {
 		// hide control points
 		hideControlPoints = !hideControlPoints;
 		break;
-	case '-':
-		if(pas > 0) --pas;
-		break;
 	case '+':
-		// decrease step
-		++pas;
+		// Increase the LOD
+		++LOD;
+		break;
+	case '-':
+		// Decrease the LOD
+		--LOD;
+		// have a minimum LOD value
+		if(LOD < 3)
+			LOD = 3;
 		break;
 	case 't':
 		creationState = translating;
@@ -264,6 +314,9 @@ void keyboard(unsigned char key, int x, int y) {
 			reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
 			std::cout << "Going in 2D mode !" << std::endl;
 		}
+		break;
+	case '1':
+		displayGrid = !displayGrid;
 		break;
 	case 127:
 		// Suppr
@@ -292,21 +345,21 @@ void menu(int opt) {
 	switch(opt) {
 	case 1:
 		std::cout << "Vert" << std::endl;
-		currentLine->setColor(0.f, 1.f, 0.f);
+		//currentLine->setColor(0.f, 1.f, 0.f);
 		break;
 	case 2:
 		std::cout << "Rouge" << std::endl;
-		currentLine->setColor(1.f, 0.f, 0.f);
+		//currentLine->setColor(1.f, 0.f, 0.f);
 		break;
 	case 3:
 		std::cout << "Bleu" << std::endl;
-		currentLine->setColor(0.f, 0.f, 1.f);
+		//currentLine->setColor(0.f, 0.f, 1.f);
 		break;
 	case 4:
 		std::cout << "Nouvelle courbe" << std::endl;
-		if(currentLine != nullptr)
-			lines.push_back(currentLine);
-		currentLine = new LineStrip();
+		//if(currentLine != nullptr)
+		//	lines.push_back(currentLine);
+		//currentLine = new LineStrip();
 		creationState = waitingForFirstClick;
 		break;
 	default:
@@ -386,6 +439,8 @@ void drawGrid2D() {
 	glEnd();
 }
 
+// Nurbs
+/////////////////////////////////////////////////////////////////////////////////
 //------------------------------------------------------------	CoxDeBoor()
 //
 float CoxDeBoor(float u, int i, int k, const float* Knots) {
@@ -457,4 +512,163 @@ void drawNurbsCurveExample() {
 	}
 	glEnd();
 }
+/////////////////////////////////////////////////////////////////////////////////
 
+// Bezier 3D
+/////////////////////////////////////////////////////////////////////////////////
+//------------------------------------------------------------	CalculateU()
+// Given our 16 control points, we can imagine 4 curves travelling
+// in a given surface direction. For example, if the parametric u
+// value was 0.5, we could imagine evaluating 4 seperate curves
+// at u=0.5.
+//
+// This function is basically here to perform that very task. each
+// row of 4 points in the u-direction is evaluated to provide us
+// with 4 new points. These new points then form a curve we can
+// evaluate in the v direction to calculate our final output point.
+//
+Point CalculateU(float t, int row) {
+
+	// the final point
+	Point p;
+
+	// the t value inverted
+	float it = 1.0f - t;
+
+	// calculate blending functions
+	float b0 = t*t*t;
+	float b1 = 3 * t*t*it;
+	float b2 = 3 * t*it*it;
+	float b3 = it*it*it;
+
+	// sum the effects of the Points and their respective blending functions
+	p.x = b0*Points[row][0].x +
+		b1*Points[row][1].x +
+		b2*Points[row][2].x +
+		b3*Points[row][3].x;
+
+	p.y = b0*Points[row][0].y +
+		b1*Points[row][1].y +
+		b2*Points[row][2].y +
+		b3*Points[row][3].y;
+
+	p.z = b0*Points[row][0].z +
+		b1*Points[row][1].z +
+		b2*Points[row][2].z +
+		b3*Points[row][3].z;
+
+	return p;
+}
+
+//------------------------------------------------------------	CalculateV()
+// Having generated 4 points in the u direction, we need to
+// use those points to generate the final point on the surface
+// by calculating a final bezier curve in the v direction.
+//     This function takes the temporary points and generates
+// the final point for the rendered surface
+//
+Point CalculateV(float t, Point* pnts) {
+	Point p;
+
+	// the t value inverted
+	float it = 1.0f - t;
+
+	// calculate blending functions
+	float b0 = t*t*t;
+	float b1 = 3 * t*t*it;
+	float b2 = 3 * t*it*it;
+	float b3 = it*it*it;
+
+	// sum the effects of the Points and their respective blending functions
+	p.x = b0*pnts[0].x +
+		b1*pnts[1].x +
+		b2*pnts[2].x +
+		b3*pnts[3].x;
+
+	p.y = b0*pnts[0].y +
+		b1*pnts[1].y +
+		b2*pnts[2].y +
+		b3*pnts[3].y;
+
+	p.z = b0*pnts[0].z +
+		b1*pnts[1].z +
+		b2*pnts[2].z +
+		b3*pnts[3].z;
+
+	return p;
+}
+
+//------------------------------------------------------------	Calculate()
+// On our bezier patch, we need to calculate a set of points
+// from the u and v parametric range of 0,0 to 1,1. This calculate
+// function performs that evaluation by using the specified u
+// and v parametric coordinates.
+//
+Point Calculate(float u, float v) {
+
+	// first of all we will need to evaluate 4 curves in the u
+	// direction. The points from those will be stored in this
+	// temporary array
+	Point temp[4];
+
+	// calculate each point on our final v curve
+	temp[0] = CalculateU(u, 0);
+	temp[1] = CalculateU(u, 1);
+	temp[2] = CalculateU(u, 2);
+	temp[3] = CalculateU(u, 3);
+
+	// having got 4 points, we can use it as a bezier curve
+	// to calculate the v direction. This should give us our
+	// final point
+	//
+	return CalculateV(v, temp);
+}
+
+
+void drawBezier3D() {
+	Point *points = new Point[LOD*LOD];
+
+	glColor3f(1, 0, 1);
+	glPointSize(4);
+	glBegin(GL_POINTS);
+
+	// use the parametric time value 0 to 1
+	for(int i = 0; i != LOD; ++i) {
+		//std::cout << " i : " << i << std::endl;
+
+		// calculate the parametric u value
+		float u = (float) i / (LOD - 1);
+
+		for(int j = 0; j != LOD; ++j) {
+			//std::cout << " j : " << j << std::endl;
+
+			// calculate the parametric v value
+			float v = (float) j / (LOD - 1);
+
+			// calculate the point on the surface
+			Point p = Calculate(u, v);
+			points[i*LOD + j] = p;
+
+			// draw point
+			glVertex3f(p.x, p.y, p.z);
+			//std::cout << "(" << p.x << ", " << p.y << ", " << p.z << ")" << std::endl;
+		}
+	}
+	glEnd();
+
+	//glEnable(GL_TEXTURE_2D);
+	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+	glLineWidth(1.0f);
+	for(int z = 0; z < LOD - 1; z++) {
+		glBegin(GL_TRIANGLE_STRIP);
+		for(int x = 0; x < LOD; x++) {
+			//std::cout << "(" << points[x][z].x << ", " << points[x][z].y << ", " << points[x][z].z << ")" << std::endl;
+			glVertex3f(points[x*LOD + z].x, points[x*LOD + z].y, points[x*LOD + z].z);
+			glVertex3f(points[x*LOD + z + 1].x, points[x*LOD + z + 1].y, points[x*LOD + z + 1].z);
+		}
+		glEnd();
+	}
+
+	delete[] points;
+}
+/////////////////////////////////////////////////////////////////////////////////
