@@ -13,6 +13,12 @@
 #define WIDTH 1280
 #define HEIGHT 720
 
+struct Point {
+	float x;
+	float y;
+	float z;
+};
+
 // OLD STUFF
 /////////////////////////////////////////////////////////////////////////////////
 int creationState = waitingForFirstClick;
@@ -28,13 +34,12 @@ color_rgb dessinColor = color_rgb(1.f, 0.f, 0.f);
 
 //Point clicked;
 /////////////////////////////////////////////////////////////////////////////////
-
 // Camera management
 /////////////////////////////////////////////////////////////////////////////////
-float zoom3D = 15.0f;
+float zoom3D = 30.0f;
 float zoom2D = 15.0f;
-float rotx3D = 0;
-float roty3D = 0.001f;
+float rotx3D = 30.0f;
+float roty3D = 0.0f;
 float tx3D = 0;
 float ty3D = 0;
 float tx2D = 0;
@@ -46,13 +51,13 @@ unsigned char Buttons[3] = {0};
 
 // Nurbs
 /////////////////////////////////////////////////////////////////////////////////
-float g_Points[7][3] = {
+Point g_Points[7] = {
 	{10, 10, 0},
-	{5, 10, 2},
+	{5, 10, 0},
 	{-5, 5, 0},
-	{-10, 5, -2},
+	{-10, 5, 0},
 	{-4, 10, 0},
-	{-4, 5, 2},
+	{-4, 5, 0},
 	{-8, 1, 0}
 };
 
@@ -68,11 +73,6 @@ unsigned int LOD = 20;
 // Bezier 3D
 /////////////////////////////////////////////////////////////////////////////////
 /// a structure to hold a control point of the surface
-struct Point {
-	float x;
-	float y;
-	float z;
-};
 
 /// 4x4 grid of points that will define the surface
 Point Points[4][4] = {
@@ -106,6 +106,8 @@ Point Points[4][4] = {
 //unsigned int LOD = 20;
 /////////////////////////////////////////////////////////////////////////////////
 
+static const Point EmptyPoint;
+
 bool is3DMode = true;
 bool displayGrid = true;
 
@@ -129,6 +131,7 @@ int main(int argc, char **argv) {
 	glutMouseFunc(mouse);
 	glutMotionFunc(motion);
 	glutKeyboardFunc(keyboard);
+	glutSpecialFunc(keyboardSpecial);
 
 	glEnable(GL_DEPTH_TEST);
 
@@ -143,21 +146,20 @@ void reshape(int w, int h) {
 		glViewport(0, 0, w, h);
 		glMatrixMode(GL_PROJECTION);
 		glLoadIdentity();
-		gluPerspective(45, (float) w / h, 0.1, 100);
+		gluPerspective(45, (float) w / h, 0.1, 100000);
 		glMatrixMode(GL_MODELVIEW);
 		glLoadIdentity();
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	}
 	else {
-		//glViewport(0, 0, w, h);
-
 		glMatrixMode(GL_PROJECTION);
 		glLoadIdentity();
 		gluOrtho2D(-w / 2, w / 2, -h / 2, h / 2);
 		//glOrtho(-w/2, w/2, -h/2, h/2, -100.0f, 100.0f);
 		glMatrixMode(GL_MODELVIEW);
 		glLoadIdentity();
-		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		glPushMatrix();
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	}
 }
 
@@ -167,10 +169,6 @@ void display() {
 	glLoadIdentity();
 
 	if(is3DMode) {
-		gluLookAt(1, 10, 26,	//	eye pos
-				  0, 5, 0,		//	aim point
-				  0, 1, 0);		//	up direction
-
 		glTranslatef(0, 0, -zoom3D);
 		glTranslatef(tx3D, ty3D, 0);
 		glRotatef(rotx3D, 1, 0, 0);
@@ -180,8 +178,6 @@ void display() {
 	else {
 		glScalef(zoom2D, zoom2D, zoom2D);
 		glTranslatef(tx2D, ty2D, 0);
-		//glRotatef(rotx3D, 1, 0, 0);
-		//glRotatef(roty3D, 0, 1, 0);
 		if(displayGrid) drawGrid2D();
 	}
 
@@ -191,7 +187,11 @@ void display() {
 	glutSwapBuffers();
 }
 
+int modifier;
+
 void mouse(int button, int state, int x, int y) {
+	modifier = glutGetModifiers();
+
 	lastx = x;
 	lasty = y;
 	switch(button) {
@@ -211,52 +211,76 @@ void mouse(int button, int state, int x, int y) {
 	glutPostRedisplay();
 }
 
+Point selectedPoint;
+int selectedPointIndex = -1;
+
 void motion(int x, int y) {
 	int diffx = x - lastx;
 	int diffy = y - lasty;
 	lastx = x;
 	lasty = y;
 
-	if(Buttons[2]) {
-		if(is3DMode) {
-			zoom3D -= (float) 0.05f * diffy;
+	switch(modifier) {
+	case 0: // NONE - Camera movement
+		if(Buttons[2]) {
+			if(is3DMode) {
+				zoom3D -= (float) 0.05f * diffy;
+			}
+			else {
+				zoom2D += (float) 0.05f * diffy;
+			}
 		}
 		else {
-			zoom2D += (float) 0.05f * diffy;
-		}
-	}
-	else {
-		if(Buttons[0]) {
-			rotx3D += (float) 0.5f * diffy;
-			roty3D += (float) 0.5f * diffx;
-		}
-		else {
-			if(Buttons[1]) {
-				if(is3DMode) {
-					tx3D += (float) 0.05f * diffx;
-					ty3D -= (float) 0.05f * diffy;
-				}
-				else {
-					tx2D += (float) 0.05f * diffx;
-					ty2D -= (float) 0.05f * diffy;
+			if(Buttons[0]) {
+				rotx3D += (float) 0.5f * diffy;
+				roty3D += (float) 0.5f * diffx;
+			}
+			else {
+				if(Buttons[1]) {
+					if(is3DMode) {
+						tx3D += (float) 0.05f * diffx;
+						ty3D -= (float) 0.05f * diffy;
+					}
+					else {
+						tx2D += (float) 0.05f * diffx;
+						ty2D -= (float) 0.05f * diffy;
+					}
 				}
 			}
 		}
+		break;
+	case 1: // SHIFT
+		if(selectedPointIndex != -1) {
+			selectedPoint.x += (float) 0.05f * diffy;
+			Points[selectedPointIndex / 4][selectedPointIndex % 4] = selectedPoint;
+		}
+		break;
+	case 2: // CTRL
+		if(selectedPointIndex != -1) {
+			selectedPoint.z += (float) 0.05f * diffy;
+			Points[selectedPointIndex / 4][selectedPointIndex % 4] = selectedPoint;
+		}
+		break;
+	case 4: // ALT
+		if(selectedPointIndex != -1) {
+			selectedPoint.y -= (float) 0.05f * diffy;
+			Points[selectedPointIndex / 4][selectedPointIndex % 4] = selectedPoint;
+		}
+		break;
 	}
 
 	glutPostRedisplay();
 }
 
 void keyboard(unsigned char key, int x, int y) {
+	modifier = glutGetModifiers();
+	int w = glutGet(GLUT_WINDOW_WIDTH);
+	int h = glutGet(GLUT_WINDOW_HEIGHT);
+
 	switch(key) {
-	case 'd': // Switch to connected strip lines creation
-		if(creationState == selectPoint) {
-			creationState = waitingForNextClick;
-		}
-		else if(creationState != waitingForFirstClick) {
-			printf("Switching to window creation\n");
-			creationState = waitingForFirstClick;
-		}
+	case 'd': // Deselect point
+		selectedPointIndex = -1;
+		selectedPoint = EmptyPoint;
 		break;
 	case 'v': // Validates
 		creationState = waitingForFirstClick;
@@ -272,10 +296,12 @@ void keyboard(unsigned char key, int x, int y) {
 		break;
 	case 's':
 		// select point
-		if(creationState != selectPoint) {
-			printf("Switching to select point\n");
-			creationState = selectPoint;
+		selectedPointIndex = -1;
+		while(selectedPointIndex < 0 || selectedPointIndex > 15) {
+			std::cout << "Select a control point (0-15)" << std::endl;
+			std::cin >> selectedPointIndex;
 		}
+		selectedPoint = Points[selectedPointIndex / 4][selectedPointIndex % 4];
 		break;
 	case 'h':
 		// hide control points
@@ -292,15 +318,21 @@ void keyboard(unsigned char key, int x, int y) {
 		if(LOD < 3)
 			LOD = 3;
 		break;
-	case 't':
-		creationState = translating;
-		break;
-	case 'r':
-		creationState = rotating;
-		break;
-	case 'o':
-		creationState = scaling;
-		break;
+		//case 't':
+		//	zoom3D = 30.0f;
+		//	rotx3D = 90.0f;
+		//	roty3D = 0.0f;
+		//	tx3D = 0;
+		//	ty3D = 0;
+
+
+		//	glViewport(0, 0, w, h);
+		//	glMatrixMode(GL_PROJECTION);
+		//	glLoadIdentity();
+		//	glOrtho(-w/2, w/2, -h/2, h/2, 0, 100.0f);
+		//	glMatrixMode(GL_MODELVIEW);
+		//	glLoadIdentity();
+		//	break;
 	case '3':
 		if(!is3DMode) {
 			is3DMode = true;
@@ -323,6 +355,53 @@ void keyboard(unsigned char key, int x, int y) {
 		break;
 	case 27:
 		exit(0);
+	}
+
+	glutPostRedisplay();
+}
+
+void keyboardSpecial(int key, int x, int y) {
+	modifier = glutGetModifiers();
+
+	switch(modifier) {
+	case 0: // NONE - Translation
+		switch(key) {
+		case 100: // LEFT
+			break;
+		case 101: // UP
+			break;
+		case 102: // RIGHT
+			break;
+		case 103: // DOWN
+			break;
+		}
+		break;
+	case 1: // SHIFT
+		switch(key) {
+			//case 100: // LEFT
+			//	break;
+			//case 101: // UP
+			//	break;
+			//case 102: // RIGHT
+			//	break;
+			//case 103: // DOWN
+			//	break;
+		}
+		break;
+	case 2: // CTRL - Rotation
+		switch(key) {
+		case 100: // LEFT
+			break;
+		case 101: // UP
+			break;
+		case 102: // RIGHT
+			break;
+		case 103: // DOWN
+			break;
+		}
+		break;
+	case 3: // ALT
+		break;
 	}
 
 	glutPostRedisplay();
@@ -477,9 +556,9 @@ void GetOutpoint(float t, float OutPoint[]) {
 		if(Val > 0.001f) {
 
 			// sum effect of CV on this part of the curve
-			OutPoint[0] += Val * g_Points[i][0];
-			OutPoint[1] += Val * g_Points[i][1];
-			OutPoint[2] += Val * g_Points[i][2];
+			OutPoint[0] += Val * g_Points[i].x;
+			OutPoint[1] += Val * g_Points[i].y;
+			OutPoint[2] += Val * g_Points[i].z;
 		}
 	}
 }
@@ -508,7 +587,7 @@ void drawNurbsCurveExample() {
 	glPointSize(3);
 	glBegin(GL_POINTS);
 	for(int i = 0; i != g_num_cvs; ++i) {
-		glVertex3fv(g_Points[i]);
+		glVertex3f(g_Points[i].x, g_Points[i].y, g_Points[i].z);
 	}
 	glEnd();
 }
@@ -666,6 +745,23 @@ void drawBezier3D() {
 			glVertex3f(points[x*LOD + z].x, points[x*LOD + z].y, points[x*LOD + z].z);
 			glVertex3f(points[x*LOD + z + 1].x, points[x*LOD + z + 1].y, points[x*LOD + z + 1].z);
 		}
+		glEnd();
+	}
+
+	glColor3f(1, 1, 0);
+	glPointSize(6);
+	glBegin(GL_POINTS);
+	for(int i = 0; i < 4; i++) {
+		for(int j = 0; j < 4; j++) {
+			glVertex3f(Points[i][j].x, Points[i][j].y, Points[i][j].z);
+		}
+	}
+	glEnd();
+
+	if(selectedPointIndex != -1) {
+		glPointSize(10);
+		glBegin(GL_POINTS);
+		glVertex3f(selectedPoint.x, selectedPoint.y, selectedPoint.z);
 		glEnd();
 	}
 

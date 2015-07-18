@@ -5,7 +5,7 @@
 /* Functions prototypes */
 void display();										// manages displaying
 void keyboard(unsigned char key, int x, int y);		// manages keyboard inputs
-void keyboardSpecial(int key, int x, int y);		// manages keyboard inputs
+void keyboardSpecial(int key, int x, int y);		// manages special keyboard inputs
 void mouse(int bouton, int etat, int x, int y);		// manages mouse clicks
 void motion(int x, int y);							// manages mouse motions
 void reshape(int w, int h);							// manages window resizing
