@@ -37,7 +37,7 @@ color_rgb dessinColor = color_rgb(1.f, 0.f, 0.f);
 // Camera management
 /////////////////////////////////////////////////////////////////////////////////
 float zoom3D = 30.0f;
-float zoom2D = 15.0f;
+float zoom2D = 30.0f;
 float rotx3D = 30.0f;
 float roty3D = 0.0f;
 float tx3D = 0;
@@ -173,6 +173,7 @@ void display() {
 		glTranslatef(tx3D, ty3D, 0);
 		glRotatef(rotx3D, 1, 0, 0);
 		glRotatef(roty3D, 0, 1, 0);
+		drawBezier3D();
 		if(displayGrid) drawGrid3D();
 	}
 	else {
@@ -182,21 +183,49 @@ void display() {
 	}
 
 	drawNurbsCurveExample();
-	drawBezier3D();
 
 	glutSwapBuffers();
 }
 
 int modifier;
+Point selectedPoint;
+int selectedPointIndex = -1;
+
+Point selectedPointNurbs;
+int selectedPointNurbsIndex = -1;
+
 
 void mouse(int button, int state, int x, int y) {
 	modifier = glutGetModifiers();
 
 	lastx = x;
 	lasty = y;
+
 	switch(button) {
 	case GLUT_LEFT_BUTTON:
 		Buttons[0] = ((GLUT_DOWN == state) ? 1 : 0);
+
+		if(!is3DMode) {
+			for(int i = 0; i < g_num_cvs; i++) {
+				float tempX = g_Points[i].x;
+				float tempY = g_Points[i].y;
+
+				float w = glutGet(GLUT_WINDOW_WIDTH);
+				float h = glutGet(GLUT_WINDOW_HEIGHT);
+
+				float modifiedX = ((x - (w / 2)) / zoom2D) - tx2D;
+				float modifiedY = -((y - (h / 2)) / zoom2D) - ty2D;
+
+				int distance = 1;
+
+				if(abs(tempX - modifiedX) < distance && abs(tempY - modifiedY) < distance) {
+					selectedPointNurbsIndex = i;
+					selectedPointNurbs = g_Points[i];
+					break;
+				}
+			}
+		}
+
 		break;
 	case GLUT_MIDDLE_BUTTON:
 		Buttons[1] = ((GLUT_DOWN == state) ? 1 : 0);
@@ -210,9 +239,6 @@ void mouse(int button, int state, int x, int y) {
 
 	glutPostRedisplay();
 }
-
-Point selectedPoint;
-int selectedPointIndex = -1;
 
 void motion(int x, int y) {
 	int diffx = x - lastx;
@@ -234,6 +260,15 @@ void motion(int x, int y) {
 			if(Buttons[0]) {
 				rotx3D += (float) 0.5f * diffy;
 				roty3D += (float) 0.5f * diffx;
+				if(!is3DMode) {
+					for(int i = 0; i < g_num_cvs; i++) {
+						if(selectedPointNurbsIndex != -1) {
+							selectedPointNurbs.x += 0.145f *(diffx / zoom2D);
+							selectedPointNurbs.y -= 0.145f *(diffy / zoom2D);
+							g_Points[selectedPointNurbsIndex] = selectedPointNurbs;
+						}
+					}
+				}
 			}
 			else {
 				if(Buttons[1]) {
@@ -279,8 +314,13 @@ void keyboard(unsigned char key, int x, int y) {
 
 	switch(key) {
 	case 'd': // Deselect point
-		selectedPointIndex = -1;
-		selectedPoint = EmptyPoint;
+		if(is3DMode) {
+			selectedPointIndex = -1;
+			selectedPoint = EmptyPoint;
+		}
+		else {
+			creationState = waitingForFirstClick;
+		}
 		break;
 	case 'v': // Validates
 		creationState = waitingForFirstClick;
@@ -296,12 +336,17 @@ void keyboard(unsigned char key, int x, int y) {
 		break;
 	case 's':
 		// select point
-		selectedPointIndex = -1;
-		while(selectedPointIndex < 0 || selectedPointIndex > 15) {
-			std::cout << "Select a control point (0-15)" << std::endl;
-			std::cin >> selectedPointIndex;
+		if(is3DMode) {
+			selectedPointIndex = -1;
+			while(selectedPointIndex < 0 || selectedPointIndex > 15) {
+				std::cout << "Select a control point (0-15)" << std::endl;
+				std::cin >> selectedPointIndex;
+			}
+			selectedPoint = Points[selectedPointIndex / 4][selectedPointIndex % 4];
 		}
-		selectedPoint = Points[selectedPointIndex / 4][selectedPointIndex % 4];
+		else {
+			creationState = selectPoint;
+		}
 		break;
 	case 'h':
 		// hide control points
@@ -377,16 +422,16 @@ void keyboardSpecial(int key, int x, int y) {
 		}
 		break;
 	case 1: // SHIFT
-		switch(key) {
-			//case 100: // LEFT
-			//	break;
-			//case 101: // UP
-			//	break;
-			//case 102: // RIGHT
-			//	break;
-			//case 103: // DOWN
-			//	break;
-		}
+		//switch(key) {
+		//case 100: // LEFT
+		//	break;
+		//case 101: // UP
+		//	break;
+		//case 102: // RIGHT
+		//	break;
+		//case 103: // DOWN
+		//	break;
+		//}
 		break;
 	case 2: // CTRL - Rotation
 		switch(key) {
@@ -584,7 +629,7 @@ void drawNurbsCurveExample() {
 
 	// Points de contrôle
 	glColor3f(1, 0, 0);
-	glPointSize(3);
+	glPointSize(6);
 	glBegin(GL_POINTS);
 	for(int i = 0; i != g_num_cvs; ++i) {
 		glVertex3f(g_Points[i].x, g_Points[i].y, g_Points[i].z);
