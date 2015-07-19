@@ -169,8 +169,7 @@ void display() {
 	glLoadIdentity();
 
 	if(is3DMode) {
-		glTranslatef(0, 0, -zoom3D);
-		glTranslatef(tx3D, ty3D, 0);
+		glTranslatef(tx3D, ty3D, -zoom3D);
 		glRotatef(rotx3D, 1, 0, 0);
 		glRotatef(roty3D, 0, 1, 0);
 		drawBezier3D();
