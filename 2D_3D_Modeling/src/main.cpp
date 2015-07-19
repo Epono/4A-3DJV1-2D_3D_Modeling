@@ -122,7 +122,7 @@ int main(int argc, char **argv) {
 	glutInitWindowPosition(100, 100);
 	glutCreateWindow("FunStuffWithOpenGL");
 
-	//createMenu();
+	createMenu();
 
 	reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
 
@@ -247,39 +247,36 @@ void motion(int x, int y) {
 
 	switch(modifier) {
 	case 0: // NONE - Camera movement
-		if(Buttons[2]) {
-			if(is3DMode) {
-				zoom3D -= (float) 0.05f * diffy;
-			}
-			else {
-				zoom2D += (float) 0.05f * diffy;
+		//if(Buttons[2]) {
+		//	if(is3DMode) {
+		//		zoom3D -= (float) 0.05f * diffy;
+		//	}
+		//	else {
+		//		zoom2D += (float) 0.05f * diffy;
+		//	}
+		//}
+		//else 
+			if(Buttons[0]) {
+			rotx3D += (float) 0.5f * diffy;
+			roty3D += (float) 0.5f * diffx;
+			if(!is3DMode) {
+				for(int i = 0; i < g_num_cvs; i++) {
+					if(selectedPointNurbsIndex != -1) {
+						selectedPointNurbs.x += 0.145f *(diffx / zoom2D);
+						selectedPointNurbs.y -= 0.145f *(diffy / zoom2D);
+						g_Points[selectedPointNurbsIndex] = selectedPointNurbs;
+					}
+				}
 			}
 		}
-		else {
-			if(Buttons[0]) {
-				rotx3D += (float) 0.5f * diffy;
-				roty3D += (float) 0.5f * diffx;
-				if(!is3DMode) {
-					for(int i = 0; i < g_num_cvs; i++) {
-						if(selectedPointNurbsIndex != -1) {
-							selectedPointNurbs.x += 0.145f *(diffx / zoom2D);
-							selectedPointNurbs.y -= 0.145f *(diffy / zoom2D);
-							g_Points[selectedPointNurbsIndex] = selectedPointNurbs;
-						}
-					}
-				}
+		else if(Buttons[1]) {
+			if(is3DMode) {
+				tx3D += (float) 0.05f * diffx;
+				ty3D -= (float) 0.05f * diffy;
 			}
 			else {
-				if(Buttons[1]) {
-					if(is3DMode) {
-						tx3D += (float) 0.05f * diffx;
-						ty3D -= (float) 0.05f * diffy;
-					}
-					else {
-						tx2D += (float) 0.05f * diffx;
-						ty2D -= (float) 0.05f * diffy;
-					}
-				}
+				tx2D += (float) 0.05f * diffx;
+				ty2D -= (float) 0.05f * diffy;
 			}
 		}
 		break;
@@ -287,6 +284,14 @@ void motion(int x, int y) {
 		if(selectedPointIndex != -1) {
 			selectedPoint.x += (float) 0.05f * diffy;
 			Points[selectedPointIndex / 4][selectedPointIndex % 4] = selectedPoint;
+		}
+		if(Buttons[1]) {
+			if(is3DMode) {
+				zoom3D -= (float) 0.05f * diffy;
+			}
+			else {
+				zoom2D += (float) 0.05f * diffy;
+			}
 		}
 		break;
 	case 2: // CTRL
