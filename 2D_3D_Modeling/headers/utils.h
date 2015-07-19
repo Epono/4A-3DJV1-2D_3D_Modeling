@@ -1,9 +1,7 @@
 #pragma once
 
-//#include "Point.h"
-
 /* Functions prototypes */
-void display();										// manages displaying
+void render();										// manages displaying
 void keyboard(unsigned char key, int x, int y);		// manages keyboard inputs
 void keyboardSpecial(int key, int x, int y);		// manages special keyboard inputs
 void mouse(int bouton, int etat, int x, int y);		// manages mouse clicks
@@ -38,3 +36,11 @@ typedef struct color_rgb {
 	float _g;
 	float _b;
 } color_rgb;
+
+typedef enum mode {
+	bsplines,
+	extrude,
+	bezierSurface
+};
+
+mode currentMode = bezierSurface;

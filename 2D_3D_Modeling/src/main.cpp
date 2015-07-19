@@ -1,5 +1,8 @@
 #include <GL/glut.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 #include <cstdlib>
 #include <vector>
 #include <iostream>
@@ -67,7 +70,7 @@ unsigned int g_degree = 3;
 unsigned int g_order = g_degree + 1;
 unsigned int g_num_knots = g_num_cvs + g_order;
 
-unsigned int LOD = 20;
+unsigned int LevelOfDetail = 20;
 /////////////////////////////////////////////////////////////////////////////////
 
 // Bezier 3D
@@ -111,6 +114,11 @@ static const Point EmptyPoint;
 bool is3DMode = true;
 bool displayGrid = true;
 
+int surfaceType = 0;
+GLuint selectedTexture = 0;
+GLuint groundTextureObj;
+GLuint lucasTextureObj;
+
 int main(int argc, char **argv) {
 	glClearColor(0.0, 0.0, 0.0, 1.0);
 	glColor3f(0.0, 0.0, 0.0);
@@ -126,7 +134,7 @@ int main(int argc, char **argv) {
 
 	reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
 
-	glutDisplayFunc(display);
+	glutDisplayFunc(render);
 	glutReshapeFunc(reshape);
 	glutMouseFunc(mouse);
 	glutMotionFunc(motion);
@@ -134,6 +142,32 @@ int main(int argc, char **argv) {
 	glutSpecialFunc(keyboardSpecial);
 
 	glEnable(GL_DEPTH_TEST);
+
+	int x, y, n;
+	unsigned char *data = stbi_load("Resources/Textures/ground_2048x2048.jpg", &x, &y, &n, STBI_rgb_alpha);
+
+	glEnable(GL_TEXTURE_2D);
+	glGenTextures(1, &groundTextureObj);
+	glBindTexture(GL_TEXTURE_2D, groundTextureObj);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, x, y, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	stbi_image_free(data);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+
+	data = stbi_load("Resources/Textures/lucas_deepdream.jpg", &x, &y, &n, STBI_rgb_alpha);
+
+	glEnable(GL_TEXTURE_2D);
+	glGenTextures(1, &lucasTextureObj);
+	glBindTexture(GL_TEXTURE_2D, lucasTextureObj);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, x, y, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	stbi_image_free(data);
+	glBindTexture(GL_TEXTURE_2D, 0);
 
 	glutMainLoop();
 }
@@ -163,7 +197,7 @@ void reshape(int w, int h) {
 	}
 }
 
-void display() {
+void render() {
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	glLoadIdentity();
@@ -172,16 +206,20 @@ void display() {
 		glTranslatef(tx3D, ty3D, -zoom3D);
 		glRotatef(rotx3D, 1, 0, 0);
 		glRotatef(roty3D, 0, 1, 0);
-		drawBezier3D();
+
 		if(displayGrid) drawGrid3D();
+
+		if(currentMode == bezierSurface) drawBezier3D();
+		else if(currentMode == extrude) drawNurbsCurveExample();
 	}
 	else {
 		glScalef(zoom2D, zoom2D, zoom2D);
 		glTranslatef(tx2D, ty2D, 0);
-		if(displayGrid) drawGrid2D();
-	}
 
-	drawNurbsCurveExample();
+		if(displayGrid) drawGrid2D();
+
+		if(currentMode == bsplines) drawNurbsCurveExample();
+	}
 
 	glutSwapBuffers();
 }
@@ -256,7 +294,7 @@ void motion(int x, int y) {
 		//	}
 		//}
 		//else 
-			if(Buttons[0]) {
+		if(Buttons[0]) {
 			rotx3D += (float) 0.5f * diffy;
 			roty3D += (float) 0.5f * diffx;
 			if(!is3DMode) {
@@ -358,14 +396,14 @@ void keyboard(unsigned char key, int x, int y) {
 		break;
 	case '+':
 		// Increase the LOD
-		++LOD;
+		++LevelOfDetail;
 		break;
 	case '-':
 		// Decrease the LOD
-		--LOD;
+		--LevelOfDetail;
 		// have a minimum LOD value
-		if(LOD < 3)
-			LOD = 3;
+		if(LevelOfDetail < 3)
+			LevelOfDetail = 3;
 		break;
 		//case 't':
 		//	zoom3D = 30.0f;
@@ -457,14 +495,23 @@ void keyboardSpecial(int key, int x, int y) {
 }
 
 void createMenu() {
-	int mainMenu;
+	int subsubMenu = glutCreateMenu(menu);
 
-	mainMenu = glutCreateMenu(menu);
+	glutAddMenuEntry("Sol", 6);
+	glutAddMenuEntry("Lucas", 7);
 
-	glutAddMenuEntry("Vert", 1);
-	glutAddMenuEntry("Rouge", 2);
-	glutAddMenuEntry("Bleu", 3);
-	glutAddMenuEntry("Nouvelle courbe", 4);
+	int subMenu = glutCreateMenu(menu);
+
+	glutAddMenuEntry("Filaire", 4);
+	glutAddMenuEntry("Plein", 5);
+	glutAddSubMenu("Texturé", subsubMenu);
+
+	int mainMenu = glutCreateMenu(menu);
+
+	glutAddMenuEntry("Courbes Bsplines", 1);
+	glutAddMenuEntry("Primitives d'extrusion (pas implémenté)", 2);
+	glutAddMenuEntry("Surfaces de Bézier", 3);
+	glutAddSubMenu("Type affichage surfaces", subMenu);
 
 	glutAttachMenu(GLUT_RIGHT_BUTTON);
 }
@@ -472,29 +519,46 @@ void createMenu() {
 void menu(int opt) {
 	switch(opt) {
 	case 1:
-		std::cout << "Vert" << std::endl;
-		//currentLine->setColor(0.f, 1.f, 0.f);
+		std::cout << "Mode Courbes Bsplines" << std::endl;
+		is3DMode = false;
+		reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
+		currentMode = bsplines;
 		break;
 	case 2:
-		std::cout << "Rouge" << std::endl;
-		//currentLine->setColor(1.f, 0.f, 0.f);
+		std::cout << "Mode Primitives d'extrusion (pas implemente)" << std::endl;
+		is3DMode = true;
+		reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
+		currentMode = extrude;
 		break;
 	case 3:
-		std::cout << "Bleu" << std::endl;
-		//currentLine->setColor(0.f, 0.f, 1.f);
+		std::cout << "Mode Surfaces de Bezier" << std::endl;
+		is3DMode = true;
+		reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
+		currentMode = bezierSurface;
 		break;
 	case 4:
-		std::cout << "Nouvelle courbe" << std::endl;
-		//if(currentLine != nullptr)
-		//	lines.push_back(currentLine);
-		//currentLine = new LineStrip();
-		creationState = waitingForFirstClick;
+		std::cout << "Type Filaire" << std::endl;
+		surfaceType = 0;
+		break;
+	case 5:
+		std::cout << "Type Plein" << std::endl;
+		surfaceType = 1;
+		break;
+	case 6:
+		std::cout << "Type Texture, sol" << std::endl;
+		surfaceType = 2;
+		selectedTexture = groundTextureObj;
+		break;
+	case 7:
+		std::cout << "Type Texture, Lucas" << std::endl;
+		surfaceType = 2;
+		selectedTexture = lucasTextureObj;
 		break;
 	default:
 		printf("What ? %d choisie mais pas d'option\n", opt);
 		break;
 	}
-	display();
+	glutPostRedisplay();
 }
 
 void setPolygonColor(float colors[3], float r, float g, float b) {
@@ -616,11 +680,11 @@ void drawNurbsCurveExample() {
 	// Courbe en elle même
 	glColor3f(1, 1, 0);
 	glBegin(GL_LINE_STRIP);
-	for(int i = 0; i != LOD; ++i) {
+	for(int i = 0; i != LevelOfDetail; ++i) {
 
-		float t = g_Knots[g_num_knots - 1] * i / (float) (LOD - 1);
+		float t = g_Knots[g_num_knots - 1] * i / (float) (LevelOfDetail - 1);
 
-		if(i == LOD - 1)
+		if(i == LevelOfDetail - 1)
 			t -= 0.001f;
 
 		float Outpoint[3] = {0, 0, 0};
@@ -754,49 +818,67 @@ Point Calculate(float u, float v) {
 
 
 void drawBezier3D() {
-	Point *points = new Point[LOD*LOD];
+	Point *points = new Point[LevelOfDetail*LevelOfDetail];
 
 	glColor3f(1, 0, 1);
 	glPointSize(4);
 	glBegin(GL_POINTS);
 
 	// use the parametric time value 0 to 1
-	for(int i = 0; i != LOD; ++i) {
+	for(int i = 0; i != LevelOfDetail; ++i) {
 		//std::cout << " i : " << i << std::endl;
 
 		// calculate the parametric u value
-		float u = (float) i / (LOD - 1);
+		float u = (float) i / (LevelOfDetail - 1);
 
-		for(int j = 0; j != LOD; ++j) {
+		for(int j = 0; j != LevelOfDetail; ++j) {
 			//std::cout << " j : " << j << std::endl;
 
 			// calculate the parametric v value
-			float v = (float) j / (LOD - 1);
+			float v = (float) j / (LevelOfDetail - 1);
 
 			// calculate the point on the surface
 			Point p = Calculate(u, v);
-			points[i*LOD + j] = p;
+			points[i*LevelOfDetail + j] = p;
 
 			// draw point
-			glVertex3f(p.x, p.y, p.z);
+			if(surfaceType != 2) {
+				glVertex3f(p.x, p.y, p.z);
+			}
 			//std::cout << "(" << p.x << ", " << p.y << ", " << p.z << ")" << std::endl;
 		}
 	}
 	glEnd();
 
-	//glEnable(GL_TEXTURE_2D);
-	glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-	glLineWidth(1.0f);
-	for(int z = 0; z < LOD - 1; z++) {
+	switch(surfaceType) {
+	case 0:
+		glLineWidth(1.0f);
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+		break;
+	case 1:
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+		break;
+	case 2:
+		glEnable(GL_TEXTURE_2D);
+		glPolygonMode(GL_FRONT, GL_FILL);
+		glBindTexture(GL_TEXTURE_2D, selectedTexture);
+		glColor3f(1.0f, 1.0f, 1.0f);
+		break;
+	}
+
+	for(int z = 0; z < LevelOfDetail - 1; z++) {
 		glBegin(GL_TRIANGLE_STRIP);
-		for(int x = 0; x < LOD; x++) {
-			//std::cout << "(" << points[x][z].x << ", " << points[x][z].y << ", " << points[x][z].z << ")" << std::endl;
-			glVertex3f(points[x*LOD + z].x, points[x*LOD + z].y, points[x*LOD + z].z);
-			glVertex3f(points[x*LOD + z + 1].x, points[x*LOD + z + 1].y, points[x*LOD + z + 1].z);
+		for(int x = 0; x < LevelOfDetail; x++) {
+			glTexCoord2d(x, z);
+			glVertex3f(points[x*LevelOfDetail + z].x, points[x*LevelOfDetail + z].y, points[x*LevelOfDetail + z].z);
+			glTexCoord2d(x, z + 1);
+			glVertex3f(points[x*LevelOfDetail + z + 1].x, points[x*LevelOfDetail + z + 1].y, points[x*LevelOfDetail + z + 1].z);
 		}
 		glEnd();
 	}
+	glBindTexture(GL_TEXTURE_2D, 0);
 
+	// Draw control points
 	glColor3f(1, 1, 0);
 	glPointSize(6);
 	glBegin(GL_POINTS);
@@ -807,6 +889,7 @@ void drawBezier3D() {
 	}
 	glEnd();
 
+	// Draw selected control point
 	if(selectedPointIndex != -1) {
 		glPointSize(10);
 		glBegin(GL_POINTS);

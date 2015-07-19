@@ -19,6 +19,7 @@
     <ClInclude Include="headers\LineStrip.h" />
     <ClInclude Include="headers\OldStuff.h" />
     <ClInclude Include="headers\Point.h" />
+    <ClInclude Include="headers\stb_image.h" />
     <ClInclude Include="headers\utils.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
