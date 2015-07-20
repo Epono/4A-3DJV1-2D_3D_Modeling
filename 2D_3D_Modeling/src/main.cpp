@@ -264,6 +264,11 @@ void mouse(int button, int state, int x, int y) {
 			}
 		}
 
+		if(state == GLUT_UP) {
+			selectedPointNurbsIndex = -1;
+			selectedPointNurbs = EmptyPoint;
+		}
+
 		break;
 	case GLUT_MIDDLE_BUTTON:
 		Buttons[1] = ((GLUT_DOWN == state) ? 1 : 0);
