@@ -1,9 +1,10 @@
+#include <cstdlib>
+
 #include <GL/glut.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-#include <cstdlib>
 #include <vector>
 #include <iostream>
 #include <math.h>
