@@ -1,21 +1,34 @@
 #include <cstdlib>
+
 #include <GL/glut.h>
-#include <windows.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 #include <vector>
 #include <iostream>
-
 #include <math.h>
+
 #include "utils.h"
-#include "Point.h"
-#include "LineStrip.h"
+//#include "Point.h"
+//#include "LineStrip.h"
 
 #define M_PI 3.14
+#define WIDTH 1280
+#define HEIGHT 720
 
+struct Point {
+	float x;
+	float y;
+	float z;
+};
+
+// OLD STUFF
+/////////////////////////////////////////////////////////////////////////////////
 int creationState = waitingForFirstClick;
 
-std::vector<LineStrip*> lines;
-LineStrip *currentLine = nullptr;
+//std::vector<LineStrip*> lines;
+//LineStrip *currentLine = nullptr;
 
 float windowColor[3] = {0, 0.5f, 0.5f};		// Window color
 int windowVerticeToMove = -1;
@@ -23,259 +36,358 @@ bool hideControlPoints = false;
 float pas = 20;
 color_rgb dessinColor = color_rgb(1.f, 0.f, 0.f);
 
-Point clicked;
+//Point clicked;
+/////////////////////////////////////////////////////////////////////////////////
+// Camera management
+/////////////////////////////////////////////////////////////////////////////////
+float zoom3D = 30.0f;
+float zoom2D = 30.0f;
+float rotx3D = 30.0f;
+float roty3D = 0.0f;
+float tx3D = 0;
+float ty3D = 0;
+float tx2D = 0;
+float ty2D = 0;
+int lastx = 0;
+int lasty = 0;
+unsigned char Buttons[3] = {0};
+/////////////////////////////////////////////////////////////////////////////////
 
-int presse = 0;										// Stores if the mouse is dragging
+// Nurbs
+/////////////////////////////////////////////////////////////////////////////////
+Point g_Points[7] = {
+	{10, 10, 0},
+	{5, 10, 0},
+	{-5, 5, 0},
+	{-10, 5, 0},
+	{-4, 10, 0},
+	{-4, 5, 0},
+	{-8, 1, 0}
+};
 
-/* Functions prototypes */
-void display();										// manages displaying
-void keyboard(unsigned char key, int x, int y);		// manages keyboard inputs
-void keyboardSpecial(int key, int x, int y);		// manages keyboard inputs
-void mouse(int bouton, int etat, int x, int y);		// manages mouse clicks
-void motion(int x, int y);							// manages mouse motions
+float g_Knots[] = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 4.0f, 4.0f, 4.0f};
+unsigned int g_num_cvs = 7;
+unsigned int g_degree = 3;
+unsigned int g_order = g_degree + 1;
+unsigned int g_num_knots = g_num_cvs + g_order;
 
-void drawWindow();									// draws the window (algorithm of my bite)
-void createMenu();
-void menu(int opt);
-void colorPicking(int option);
-void setPolygonColor(float colors[3], float r, float g, float b);
-void write();										// Writes on the top left what's happening
+unsigned int LevelOfDetail = 20;
+/////////////////////////////////////////////////////////////////////////////////
 
-Point* DC(const std::vector<Point>& p, float t);
-void drawBezier(int p, LineStrip& line);
-Point drawBezier(Point A, Point B, Point C, Point D, double t);
-void drawLine(Point& p1, Point& p2);
-void drawCurve(LineStrip& line, int lineSize);
+// Bezier 3D
+/////////////////////////////////////////////////////////////////////////////////
+/// a structure to hold a control point of the surface
 
-void translate(int xOffset, int yOffset);
-void scale(float scaleX, float scaleY);
-void rotate(float angle);
+/// 4x4 grid of points that will define the surface
+Point Points[4][4] = {
+	{
+		{10, 0, 10},
+		{5, 0, 10},
+		{-5, 0, 10},
+		{-10, 0, 10}
+	},
+	{
+		{10, 0, 5},
+		{5, 6, 5},
+		{-5, 6, 5},
+		{-10, 0, 5}
+	},
+	{
+		{10, 0, -5},
+		{5, 6, -5},
+		{-5, 6, -5},
+		{-10, 0, -5}
+	},
+	{
+		{10, 0, -10},
+		{5, 0, -10},
+		{-5, 0, -10},
+		{-10, 0, -10}
+	}
+};
+
+// the level of detail of the surface
+//unsigned int LOD = 20;
+/////////////////////////////////////////////////////////////////////////////////
+
+static const Point EmptyPoint;
+
+bool is3DMode = true;
+bool displayGrid = true;
+
+int surfaceType = 0;
+GLuint selectedTexture = 0;
+GLuint groundTextureObj;
+GLuint lucasTextureObj;
 
 int main(int argc, char **argv) {
-	//Glut and Window Initialization
-	glutInit(&argc, argv);										// Initializes Glut
-	glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);	// RGB display mode, with depth
-	glutInitWindowSize(1280, 720);								// Sets window's dimensions
-	glutInitWindowPosition(100, 100);							// Positions the window
-	glutCreateWindow("FunStuffWithOpenGL");						// Title of the window
+	glClearColor(0.0, 0.0, 0.0, 1.0);
+	glColor3f(0.0, 0.0, 0.0);
+	glPointSize(4.0);
 
-	gluOrtho2D(0, 1280, 720, 0);									// 2D orthogonal frame with xMin, xMax, yMin, yMax
+	glutInit(&argc, argv);
+	glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH);
+	glutInitWindowSize(WIDTH, HEIGHT);
+	glutInitWindowPosition(100, 100);
+	glutCreateWindow("FunStuffWithOpenGL");
 
-	// OpenGL initialization
-	glClearColor(0.0, 0.0, 0.0, 1.0);		// Background color : black ?
-	glColor3f(0.0, 0.0, 0.0);				// Color : white
-	glPointSize(4.0);						// Point size : 4px
+	createMenu();
 
-	// Registering of callback functions called by glut
-	glutDisplayFunc(display);
-	glutKeyboardFunc(keyboard);
-	glutSpecialFunc(keyboardSpecial);
+	reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
+
+	glutDisplayFunc(render);
+	glutReshapeFunc(reshape);
 	glutMouseFunc(mouse);
 	glutMotionFunc(motion);
+	glutKeyboardFunc(keyboard);
+	glutSpecialFunc(keyboardSpecial);
 
-	currentLine = new LineStrip();
+	glEnable(GL_DEPTH_TEST);
 
-	//glOrtho(-1, 1.0, -1, 1.0, -1.0, 1.0); // il faut le mettre ?
-	createMenu();							// Creates the menu available via right-click
-	glMatrixMode(GL_MODELVIEW);
+	int x, y, n;
+	unsigned char *data = stbi_load("Resources/Textures/ground_2048x2048.jpg", &x, &y, &n, STBI_rgb_alpha);
 
-	glutMainLoop();         // Launches main OpenGL loop, events handlers
-	return 0;				// Should not get here (unless we exit with 'q' ?)
+	glEnable(GL_TEXTURE_2D);
+	glGenTextures(1, &groundTextureObj);
+	glBindTexture(GL_TEXTURE_2D, groundTextureObj);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, x, y, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	stbi_image_free(data);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+
+	data = stbi_load("Resources/Textures/lucas_deepdream.jpg", &x, &y, &n, STBI_rgb_alpha);
+
+	glEnable(GL_TEXTURE_2D);
+	glGenTextures(1, &lucasTextureObj);
+	glBindTexture(GL_TEXTURE_2D, lucasTextureObj);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, x, y, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+	stbi_image_free(data);
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	glutMainLoop();
 }
 
-Point* DC(const std::vector<Point>& p, float t) {
-	int n = p.size();
-	std::vector<Point> q(n);
-	for(int i = 0; i < n; ++i)
-		q.at(i) = p.at(i);
-	for(int k = 1; k < n; ++k)
-		for(int i = 0; i < n - k; ++i) {
-			q.at(i).setX((1 - t)*q.at(i).getX() + t*q.at(i + 1).getX());
-			q.at(i).setY((1 - t)*q.at(i).getY() + t*q.at(i + 1).getY());
-		}
-	return new Point(q.at(0));
-}
+void reshape(int w, int h) {
+	if(w == 0)
+		h = 1;
 
-void drawBezier(float pas, LineStrip& line) {
-	Point A = line.getPoints().at(0), B;
-	for(float k = 1.f; k <= pas; ++k) {
-		B = *DC(line.getPoints(), k / pas);
-		drawLine(A, B);
-		A = B;
+	if(is3DMode) {
+		glViewport(0, 0, w, h);
+		glMatrixMode(GL_PROJECTION);
+		glLoadIdentity();
+		gluPerspective(45, (float) w / h, 0.1, 100000);
+		glMatrixMode(GL_MODELVIEW);
+		glLoadIdentity();
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	}
+	else {
+		glMatrixMode(GL_PROJECTION);
+		glLoadIdentity();
+		gluOrtho2D(-w / 2, w / 2, -h / 2, h / 2);
+		//glOrtho(-w/2, w/2, -h/2, h/2, -100.0f, 100.0f);
+		glMatrixMode(GL_MODELVIEW);
+		glLoadIdentity();
+		glPushMatrix();
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	}
 }
 
-void drawLine(Point& p1, Point& p2) {
-	glBegin(GL_LINES);
-	glVertex2f(p1.getX(), p1.getY());
-	glVertex2f(p2.getX(), p2.getY());
-	glEnd();
+void render() {
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	glLoadIdentity();
+
+	if(is3DMode) {
+		glTranslatef(tx3D, ty3D, -zoom3D);
+		glRotatef(rotx3D, 1, 0, 0);
+		glRotatef(roty3D, 0, 1, 0);
+
+		if(displayGrid) drawGrid3D();
+
+		if(currentMode == bezierSurface) drawBezier3D();
+		else if(currentMode == extrude) drawNurbsCurveExample();
+	}
+	else {
+		glScalef(zoom2D, zoom2D, zoom2D);
+		glTranslatef(tx2D, ty2D, 0);
+
+		if(displayGrid) drawGrid2D();
+
+		if(currentMode == bsplines) drawNurbsCurveExample();
+	}
+
+	glutSwapBuffers();
 }
 
-/*
-* Function in charge of refreshing the display of the window
-*/
-void display() {
-	glClear(GL_COLOR_BUFFER_BIT);	// Clears the display
+int modifier;
+Point selectedPoint;
+int selectedPointIndex = -1;
 
-	write();
+Point selectedPointNurbs;
+int selectedPointNurbsIndex = -1;
 
-	for(auto &l : lines)
-		drawCurve(*l, 2);
-	if(currentLine != nullptr)
-		drawCurve(*currentLine, 2);
 
-	glutSwapBuffers();				// Double buffer ?
-	glFlush();						// Forces refresh ?
-}
-
-/*
-* Function in charge of handling mouse events (clicking only, not dragging)
-*/
 void mouse(int button, int state, int x, int y) {
-	clicked = Point(x, y);
-	Point point(x, y);
-	if(currentLine != nullptr) {
-		if(button == GLUT_LEFT_BUTTON && state == GLUT_UP) {
-			presse = 1;
-			switch(creationState) {
-			case pending:
-				printf("Coords clicked (pending state) : (%d, %d)\n", x, y);
-				break;
-			case waitingForFirstClick:
-				currentLine->addPoint(point);
-				creationState++;
-				break;
-			case waitingForNextClick:
-				currentLine->addPoint(point);
-				break;
-			case selectPoint:
-				break;
+	modifier = glutGetModifiers();
+
+	lastx = x;
+	lasty = y;
+
+	switch(button) {
+	case GLUT_LEFT_BUTTON:
+		Buttons[0] = ((GLUT_DOWN == state) ? 1 : 0);
+
+		if(!is3DMode) {
+			for(int i = 0; i < g_num_cvs; i++) {
+				float tempX = g_Points[i].x;
+				float tempY = g_Points[i].y;
+
+				float w = glutGet(GLUT_WINDOW_WIDTH);
+				float h = glutGet(GLUT_WINDOW_HEIGHT);
+
+				float modifiedX = ((x - (w / 2)) / zoom2D) - tx2D;
+				float modifiedY = -((y - (h / 2)) / zoom2D) - ty2D;
+
+				int distance = 1;
+
+				if(abs(tempX - modifiedX) < distance && abs(tempY - modifiedY) < distance) {
+					selectedPointNurbsIndex = i;
+					selectedPointNurbs = g_Points[i];
+					break;
+				}
 			}
 		}
-		if(currentLine->getPoints().size() > 0) {
-			if(button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
-				presse = 0;
-				windowVerticeToMove = -1;
-				std::vector<Point>& points = currentLine->getPoints();
-				if(creationState == selectPoint) {
-					for(unsigned int i = 0; i < points.size(); i++) {
-						float tempX = points.at(i).getX();
-						float tempY = points.at(i).getY();
-						int distance = 10;
-						if(abs(tempX - x) < distance && abs(tempY - y) < distance) {
-							windowVerticeToMove = i;
-							break;
-						}
+
+		break;
+	case GLUT_MIDDLE_BUTTON:
+		Buttons[1] = ((GLUT_DOWN == state) ? 1 : 0);
+		break;
+	case GLUT_RIGHT_BUTTON:
+		Buttons[2] = ((GLUT_DOWN == state) ? 1 : 0);
+		break;
+	default:
+		break;
+	}
+
+	glutPostRedisplay();
+}
+
+void motion(int x, int y) {
+	int diffx = x - lastx;
+	int diffy = y - lasty;
+	lastx = x;
+	lasty = y;
+
+	switch(modifier) {
+	case 0: // NONE - Camera movement
+		//if(Buttons[2]) {
+		//	if(is3DMode) {
+		//		zoom3D -= (float) 0.05f * diffy;
+		//	}
+		//	else {
+		//		zoom2D += (float) 0.05f * diffy;
+		//	}
+		//}
+		//else 
+		if(Buttons[0]) {
+			rotx3D += (float) 0.5f * diffy;
+			roty3D += (float) 0.5f * diffx;
+			if(!is3DMode) {
+				for(int i = 0; i < g_num_cvs; i++) {
+					if(selectedPointNurbsIndex != -1) {
+						selectedPointNurbs.x += 0.145f *(diffx / zoom2D);
+						selectedPointNurbs.y -= 0.145f *(diffy / zoom2D);
+						g_Points[selectedPointNurbsIndex] = selectedPointNurbs;
 					}
 				}
 			}
 		}
+		else if(Buttons[1]) {
+			if(is3DMode) {
+				tx3D += (float) 0.05f * diffx;
+				ty3D -= (float) 0.05f * diffy;
+			}
+			else {
+				tx2D += (float) 0.05f * diffx;
+				ty2D -= (float) 0.05f * diffy;
+			}
+		}
+		break;
+	case 1: // SHIFT
+		if(selectedPointIndex != -1) {
+			selectedPoint.x += (float) 0.05f * diffy;
+			Points[selectedPointIndex / 4][selectedPointIndex % 4] = selectedPoint;
+		}
+		if(Buttons[1]) {
+			if(is3DMode) {
+				zoom3D -= (float) 0.05f * diffy;
+			}
+			else {
+				zoom2D += (float) 0.05f * diffy;
+			}
+		}
+		break;
+	case 2: // CTRL
+		if(selectedPointIndex != -1) {
+			selectedPoint.z += (float) 0.05f * diffy;
+			Points[selectedPointIndex / 4][selectedPointIndex % 4] = selectedPoint;
+		}
+		break;
+	case 4: // ALT
+		if(selectedPointIndex != -1) {
+			selectedPoint.y -= (float) 0.05f * diffy;
+			Points[selectedPointIndex / 4][selectedPointIndex % 4] = selectedPoint;
+		}
+		break;
 	}
 
-	glutPostRedisplay();		// Refresh display
+	glutPostRedisplay();
 }
 
-void motion(int x, int y) {
-	if(creationState == selectPoint) {
-		if(windowVerticeToMove != -1) {
-			std::vector<Point>& points = currentLine->getPoints();
-			points.at(windowVerticeToMove).setX(x);
-			points.at(windowVerticeToMove).setY(y);
-		}
-	}
-	else if(creationState == scaling) {
-		float xOffset = clicked.getX() - x;
-		float yOffset = clicked.getY() - y;
-		scale(1 - (xOffset / 500), 1 + (yOffset / 500));
-		clicked.setX(x);
-		clicked.setY(y);
-	}
-	else if(creationState == rotating) {
-		// OLD WAY
-		//float xOffset = clicked.getX() - x;
-		//float yOffset = clicked.getY() - y;
-		//rotate(0 - (xOffset / 200));
-		//clicked.setX(x);
-		//clicked.setY(y);
-
-		// NEW WAY
-		float sumX = 0;
-		float sumY = 0;
-
-		//Calcul du barycentre pour décaler
-		std::vector<Point>& points = currentLine->getPoints();
-		for(unsigned int i = 0; i < points.size(); i++) {
-			sumX += points.at(i).getX();
-			sumY += points.at(i).getY();
-		}
-
-		Point barycenter = {sumX / points.size(), sumY / points.size()};
-
-		Point a(clicked);
-		Point b(barycenter);
-		Point c(x, y);
-
-		Point ab(b.getX() - a.getX(), b.getY() - a.getY());
-		Point cb(b.getX() - c.getX(), b.getY() - c.getY());
-
-		float dot = (ab.getX() * cb.getX() + ab.getY() * cb.getY()); // dot product
-		float cross = (ab.getX() * cb.getY() - ab.getY() * cb.getX()); // cross product
-
-		float alpha = atan2(cross, dot);
-
-		float angle = floor(alpha * 180. / M_PI + 0.5);
-
-		//std::cout << angle << std::endl;
-
-		rotate(angle * (M_PI / 180));
-
-		clicked.setX(x);
-		clicked.setY(y);
-	}
-	else if(creationState == translating) {
-		float xOffset = clicked.getX() - x;
-		float yOffset = clicked.getY() - y;
-		translate(-xOffset, -yOffset);
-		clicked.setX(x);
-		clicked.setY(y);
-	}
-
-	glutPostRedisplay(); // Rafraichissement de l'affichage
-}
-
-/*
-* Function in charge of handling keyboard events
-* key : key pressed
-* x, y : coordinates of the pointer when the key was pressed ?
-*/
 void keyboard(unsigned char key, int x, int y) {
+	modifier = glutGetModifiers();
+	int w = glutGet(GLUT_WINDOW_WIDTH);
+	int h = glutGet(GLUT_WINDOW_HEIGHT);
+
 	switch(key) {
-	case 'd': // Switch to connected strip lines creation
-		if(creationState == selectPoint) {
-			creationState = waitingForNextClick;
+	case 'd': // Deselect point
+		if(is3DMode) {
+			selectedPointIndex = -1;
+			selectedPoint = EmptyPoint;
 		}
-		else if(creationState != waitingForFirstClick) {
-			printf("Switching to window creation\n");
+		else {
 			creationState = waitingForFirstClick;
 		}
 		break;
 	case 'v': // Validates
 		creationState = waitingForFirstClick;
-		if(currentLine != nullptr) {
-			lines.push_back(currentLine);
-			currentLine = new LineStrip();
-		}
+		//if(currentLine != nullptr) {
+		//	lines.push_back(currentLine);
+		//	currentLine = new LineStrip();
+		//}
 		break;
 	case 'c': // Clear the window
 		creationState = waitingForFirstClick;
-		lines.clear();
-		currentLine = new LineStrip();
+		//lines.clear();
+		//currentLine = new LineStrip();
 		break;
 	case 's':
 		// select point
-		if(creationState != selectPoint) {
-			printf("Switching to select point\n");
+		if(is3DMode) {
+			selectedPointIndex = -1;
+			while(selectedPointIndex < 0 || selectedPointIndex > 15) {
+				std::cout << "Select a control point (0-15)" << std::endl;
+				std::cin >> selectedPointIndex;
+			}
+			selectedPoint = Points[selectedPointIndex / 4][selectedPointIndex % 4];
+		}
+		else {
 			creationState = selectPoint;
 		}
 		break;
@@ -283,131 +395,96 @@ void keyboard(unsigned char key, int x, int y) {
 		// hide control points
 		hideControlPoints = !hideControlPoints;
 		break;
-	case '-':
-		if(pas > 0) --pas;
-		break;
 	case '+':
-		// decrease step
-		++pas;
+		// Increase the LOD
+		++LevelOfDetail;
 		break;
-	case 't':
-		creationState = translating;
+	case '-':
+		// Decrease the LOD
+		--LevelOfDetail;
+		// have a minimum LOD value
+		if(LevelOfDetail < 3)
+			LevelOfDetail = 3;
 		break;
-	case 'r':
-		creationState = rotating;
-		break;
-	case 'o':
-		creationState = scaling;
-		break;
-	case '0': // New C0 
-	{
-		if(currentLine->getPoints().size() > 2) {
-			lines.push_back(currentLine);
-			LineStrip* previousLine = lines.back();
-			Point previousPoint = previousLine->getPoints().back();
-			currentLine = new LineStrip();
-			currentLine->addPoint(Point(previousPoint));
+		//case 't':
+		//	zoom3D = 30.0f;
+		//	rotx3D = 90.0f;
+		//	roty3D = 0.0f;
+		//	tx3D = 0;
+		//	ty3D = 0;
+
+
+		//	glViewport(0, 0, w, h);
+		//	glMatrixMode(GL_PROJECTION);
+		//	glLoadIdentity();
+		//	glOrtho(-w/2, w/2, -h/2, h/2, 0, 100.0f);
+		//	glMatrixMode(GL_MODELVIEW);
+		//	glLoadIdentity();
+		//	break;
+	case '3':
+		if(!is3DMode) {
+			is3DMode = true;
+			reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
+			std::cout << "Going in 3D mode !" << std::endl;
 		}
 		break;
-	}
-	case '1': // New C1 
-	{
-		if(currentLine->getPoints().size() > 2) {
-			lines.push_back(currentLine);
-			LineStrip* previousLine = lines.back();
-			Point previousPoint = previousLine->getPoints().back();
-			Point previousPreviousPoint = previousLine->getPoints().rbegin()[1];
-			Point newPoint(previousPoint.getX() + (previousPoint.getX() - previousPreviousPoint.getX()), previousPoint.getY() + (previousPoint.getY() - previousPreviousPoint.getY()));
-			currentLine = new LineStrip();
-			currentLine->addPoint(Point(previousPoint));
-			currentLine->addPoint(newPoint);
+	case '2':
+		if(is3DMode) {
+			is3DMode = false;
+			reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
+			std::cout << "Going in 2D mode !" << std::endl;
 		}
 		break;
-	}
-	case '2': // New C2 
-	{
-		if(currentLine->getPoints().size() > 2) {
-			lines.push_back(currentLine);
-			LineStrip* previousLine = lines.back();
-			Point previousPoint = previousLine->getPoints().back();
-			Point previousPreviousPoint = previousLine->getPoints().rbegin()[1];
-			Point previousPreviousPreviousPoint = previousLine->getPoints().rbegin()[2];
-			Point newPoint(2 * previousPoint.getX() - previousPreviousPoint.getX(), 2 * previousPoint.getY() - previousPreviousPoint.getY());
-			Point newNewPoint(previousPreviousPreviousPoint.getX() + 2 * (newPoint.getX() - previousPreviousPoint.getX()),
-							  previousPreviousPreviousPoint.getY() + 2 * (newPoint.getY() - previousPreviousPoint.getY()));
-			currentLine = new LineStrip();
-			currentLine->addPoint(Point(previousPoint));
-			currentLine->addPoint(newPoint);
-			currentLine->addPoint(newNewPoint);
-		}
+	case '1':
+		displayGrid = !displayGrid;
 		break;
-	}
 	case 127:
-		// deletes selected point
-		if(windowVerticeToMove != -1) {
-			std::vector<Point>& points = currentLine->getPoints();
-			points.erase(points.begin() + windowVerticeToMove);
-		}
-		windowVerticeToMove = -1;
+		// Suppr
 		break;
 	case 27:
 		exit(0);
-	case 'q':
-		exit(0);
 	}
 
-	glutPostRedisplay(); // Rafraichissement de l'affichage
+	glutPostRedisplay();
 }
 
 void keyboardSpecial(int key, int x, int y) {
-	int modifier = glutGetModifiers();
+	modifier = glutGetModifiers();
 
 	switch(modifier) {
 	case 0: // NONE - Translation
 		switch(key) {
 		case 100: // LEFT
-			translate(-10, 0);
 			break;
 		case 101: // UP
-			translate(0, -10);
 			break;
 		case 102: // RIGHT
-			translate(10, 0);
 			break;
 		case 103: // DOWN
-			translate(0, 10);
 			break;
 		}
 		break;
-	case 1: // SHIFT - Scaling
-		switch(key) {
-		case 100: // LEFT
-			scale(0.9f, 1.0f);
-			break;
-		case 101: // UP
-			scale(1.0f, 1.1f);
-			break;
-		case 102: // RIGHT
-			scale(1.1f, 1.0f);
-			break;
-		case 103: // DOWN
-			scale(1.0f, 0.9f);
-			break;
-		}
+	case 1: // SHIFT
+		//switch(key) {
+		//case 100: // LEFT
+		//	break;
+		//case 101: // UP
+		//	break;
+		//case 102: // RIGHT
+		//	break;
+		//case 103: // DOWN
+		//	break;
+		//}
 		break;
 	case 2: // CTRL - Rotation
 		switch(key) {
 		case 100: // LEFT
-			rotate(0.05f);
 			break;
 		case 101: // UP
-			rotate(0.05f);
 			break;
 		case 102: // RIGHT
-			rotate(-0.05f);
 			break;
 		case 103: // DOWN
-			rotate(-0.05f);
 			break;
 		}
 		break;
@@ -415,21 +492,27 @@ void keyboardSpecial(int key, int x, int y) {
 		break;
 	}
 
-	glutPostRedisplay(); // Rafraichissement de l'affichage
+	glutPostRedisplay();
 }
 
-/*
-* Creates the menu available via right-click
-*/
 void createMenu() {
-	int mainMenu;
+	int subsubMenu = glutCreateMenu(menu);
 
-	mainMenu = glutCreateMenu(menu);
+	glutAddMenuEntry("Sol", 6);
+	glutAddMenuEntry("Lucas", 7);
 
-	glutAddMenuEntry("Vert", 1);
-	glutAddMenuEntry("Rouge", 2);
-	glutAddMenuEntry("Bleu", 3);
-	glutAddMenuEntry("Nouvelle courbe", 4);
+	int subMenu = glutCreateMenu(menu);
+
+	glutAddMenuEntry("Filaire", 4);
+	glutAddMenuEntry("Plein", 5);
+	glutAddSubMenu("Texturé", subsubMenu);
+
+	int mainMenu = glutCreateMenu(menu);
+
+	glutAddMenuEntry("Courbes Bsplines", 1);
+	glutAddMenuEntry("Primitives d'extrusion (pas implémenté)", 2);
+	glutAddMenuEntry("Surfaces de Bézier", 3);
+	glutAddSubMenu("Type affichage surfaces", subMenu);
 
 	glutAttachMenu(GLUT_RIGHT_BUTTON);
 }
@@ -437,29 +520,46 @@ void createMenu() {
 void menu(int opt) {
 	switch(opt) {
 	case 1:
-		std::cout << "Vert" << std::endl;
-		currentLine->setColor(0.f, 1.f, 0.f);
+		std::cout << "Mode Courbes Bsplines" << std::endl;
+		is3DMode = false;
+		reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
+		currentMode = bsplines;
 		break;
 	case 2:
-		std::cout << "Rouge" << std::endl;
-		currentLine->setColor(1.f, 0.f, 0.f);
+		std::cout << "Mode Primitives d'extrusion (pas implemente)" << std::endl;
+		is3DMode = true;
+		reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
+		currentMode = extrude;
 		break;
 	case 3:
-		std::cout << "Bleu" << std::endl;
-		currentLine->setColor(0.f, 0.f, 1.f);
+		std::cout << "Mode Surfaces de Bezier" << std::endl;
+		is3DMode = true;
+		reshape(glutGet(GLUT_WINDOW_WIDTH), glutGet(GLUT_WINDOW_HEIGHT));
+		currentMode = bezierSurface;
 		break;
 	case 4:
-		std::cout << "Nouvelle courbe" << std::endl;
-		if(currentLine != nullptr)
-			lines.push_back(currentLine);
-		currentLine = new LineStrip();
-		creationState = waitingForFirstClick;
+		std::cout << "Type Filaire" << std::endl;
+		surfaceType = 0;
+		break;
+	case 5:
+		std::cout << "Type Plein" << std::endl;
+		surfaceType = 1;
+		break;
+	case 6:
+		std::cout << "Type Texture, sol" << std::endl;
+		surfaceType = 2;
+		selectedTexture = groundTextureObj;
+		break;
+	case 7:
+		std::cout << "Type Texture, Lucas" << std::endl;
+		surfaceType = 2;
+		selectedTexture = lucasTextureObj;
 		break;
 	default:
 		printf("What ? %d choisie mais pas d'option\n", opt);
 		break;
 	}
-	display();
+	glutPostRedisplay();
 }
 
 void setPolygonColor(float colors[3], float r, float g, float b) {
@@ -468,149 +568,336 @@ void setPolygonColor(float colors[3], float r, float g, float b) {
 	*(colors + 2) = b;
 }
 
-void drawCurve(LineStrip& line, int lineSize) {
-	glLineWidth(lineSize);
-	glColor3f(1.0f, 0.0f, 0.0f);		// Sets the drawing color
-	if(!hideControlPoints) {
-		// Draws line strip
-		glBegin(GL_LINE_STRIP);
-		for(auto &p : line.getPoints())
-			glVertex2f(p.getX(), p.getY());
-		glEnd();
+void drawGrid3D() {
+	glLineWidth(5.0f);
+	glBegin(GL_LINES);
 
-		// Draws vertices of the connected lines strip
+	// Red = x
+	// Green = y
+	// Blue = z
+	glColor3f(1.0, 0.0, 0.0);
+	glVertex3f(0, 0, 0);
+	glVertex3f(5, 0, 0);
+
+	glColor3f(0.0, 1.0, 0.0);
+	glVertex3f(0, 0, 0);
+	glVertex3f(0, 5, 0);
+
+	glColor3f(0.0, 0.0, 1.0);
+	glVertex3f(0, 0, 0);
+	glVertex3f(0, 0, 5);
+	glEnd();
+
+	glLineWidth(1.0f);
+	glBegin(GL_LINES);
+	glColor3f(1.0, 1.0, 1.0);
+	for(int i = -10; i <= 10; ++i) {
+		glVertex3f(i, 0, -10);
+		glVertex3f(i, 0, 10);
+
+		glVertex3f(10, 0, i);
+		glVertex3f(-10, 0, i);
+	}
+
+	glEnd();
+}
+
+void drawGrid2D() {
+	glLineWidth(5.0f);
+	glBegin(GL_LINES);
+
+	// Red = x
+	// Green = y
+	glColor3f(1.0, 0.0, 0.0);
+	glVertex3f(0, 0, 0);
+	glVertex3f(5, 0, 0);
+
+	glColor3f(0.0, 1.0, 0.0);
+	glVertex3f(0, 0, 0);
+	glVertex3f(0, 5, 0);
+
+	glEnd();
+
+	glLineWidth(1.0f);
+	glBegin(GL_LINES);
+	glColor3f(1.0, 1.0, 1.0);
+	for(int i = -10; i <= 10; ++i) {
+		glVertex3f(i, -10, 0);
+		glVertex3f(i, 10, 0);
+
+		glVertex3f(10, i, 0);
+		glVertex3f(-10, i, 0);
+	}
+
+	glEnd();
+}
+
+// Nurbs
+/////////////////////////////////////////////////////////////////////////////////
+//------------------------------------------------------------	CoxDeBoor()
+//
+float CoxDeBoor(float u, int i, int k, const float* Knots) {
+	if(k == 1) {
+		if(Knots[i] <= u && u <= Knots[i + 1]) {
+			return 1.0f;
+		}
+		return 0.0f;
+	}
+	float Den1 = Knots[i + k - 1] - Knots[i];
+	float Den2 = Knots[i + k] - Knots[i + 1];
+	float Eq1 = 0, Eq2 = 0;
+	if(Den1 > 0) {
+		Eq1 = ((u - Knots[i]) / Den1) * CoxDeBoor(u, i, k - 1, Knots);
+	}
+	if(Den2 > 0) {
+		Eq2 = (Knots[i + k] - u) / Den2 * CoxDeBoor(u, i + 1, k - 1, Knots);
+	}
+	return Eq1 + Eq2;
+}
+
+//------------------------------------------------------------	GetOutpoint()
+//
+void GetOutpoint(float t, float OutPoint[]) {
+
+	// sum the effect of all CV's on the curve at this point to 
+	// get the evaluated curve point
+	// 
+	for(unsigned int i = 0; i != g_num_cvs; ++i) {
+
+		// calculate the effect of this point on the curve
+		float Val = CoxDeBoor(t, i, g_order, g_Knots);
+
+		if(Val > 0.001f) {
+
+			// sum effect of CV on this part of the curve
+			OutPoint[0] += Val * g_Points[i].x;
+			OutPoint[1] += Val * g_Points[i].y;
+			OutPoint[2] += Val * g_Points[i].z;
+		}
+	}
+}
+
+void drawNurbsCurveExample() {
+	// Courbe en elle même
+	glColor3f(1, 1, 0);
+	glBegin(GL_LINE_STRIP);
+	for(int i = 0; i != LevelOfDetail; ++i) {
+
+		float t = g_Knots[g_num_knots - 1] * i / (float) (LevelOfDetail - 1);
+
+		if(i == LevelOfDetail - 1)
+			t -= 0.001f;
+
+		float Outpoint[3] = {0, 0, 0};
+
+		GetOutpoint(t, Outpoint);
+
+		glVertex3fv(Outpoint);
+	}
+	glEnd();
+
+	// Points de contrôle
+	glColor3f(1, 0, 0);
+	glPointSize(6);
+	glBegin(GL_POINTS);
+	for(int i = 0; i != g_num_cvs; ++i) {
+		glVertex3f(g_Points[i].x, g_Points[i].y, g_Points[i].z);
+	}
+	glEnd();
+}
+/////////////////////////////////////////////////////////////////////////////////
+
+// Bezier 3D
+/////////////////////////////////////////////////////////////////////////////////
+//------------------------------------------------------------	CalculateU()
+// Given our 16 control points, we can imagine 4 curves travelling
+// in a given surface direction. For example, if the parametric u
+// value was 0.5, we could imagine evaluating 4 seperate curves
+// at u=0.5.
+//
+// This function is basically here to perform that very task. each
+// row of 4 points in the u-direction is evaluated to provide us
+// with 4 new points. These new points then form a curve we can
+// evaluate in the v direction to calculate our final output point.
+//
+Point CalculateU(float t, int row) {
+
+	// the final point
+	Point p;
+
+	// the t value inverted
+	float it = 1.0f - t;
+
+	// calculate blending functions
+	float b0 = t*t*t;
+	float b1 = 3 * t*t*it;
+	float b2 = 3 * t*it*it;
+	float b3 = it*it*it;
+
+	// sum the effects of the Points and their respective blending functions
+	p.x = b0*Points[row][0].x +
+		b1*Points[row][1].x +
+		b2*Points[row][2].x +
+		b3*Points[row][3].x;
+
+	p.y = b0*Points[row][0].y +
+		b1*Points[row][1].y +
+		b2*Points[row][2].y +
+		b3*Points[row][3].y;
+
+	p.z = b0*Points[row][0].z +
+		b1*Points[row][1].z +
+		b2*Points[row][2].z +
+		b3*Points[row][3].z;
+
+	return p;
+}
+
+//------------------------------------------------------------	CalculateV()
+// Having generated 4 points in the u direction, we need to
+// use those points to generate the final point on the surface
+// by calculating a final bezier curve in the v direction.
+//     This function takes the temporary points and generates
+// the final point for the rendered surface
+//
+Point CalculateV(float t, Point* pnts) {
+	Point p;
+
+	// the t value inverted
+	float it = 1.0f - t;
+
+	// calculate blending functions
+	float b0 = t*t*t;
+	float b1 = 3 * t*t*it;
+	float b2 = 3 * t*it*it;
+	float b3 = it*it*it;
+
+	// sum the effects of the Points and their respective blending functions
+	p.x = b0*pnts[0].x +
+		b1*pnts[1].x +
+		b2*pnts[2].x +
+		b3*pnts[3].x;
+
+	p.y = b0*pnts[0].y +
+		b1*pnts[1].y +
+		b2*pnts[2].y +
+		b3*pnts[3].y;
+
+	p.z = b0*pnts[0].z +
+		b1*pnts[1].z +
+		b2*pnts[2].z +
+		b3*pnts[3].z;
+
+	return p;
+}
+
+//------------------------------------------------------------	Calculate()
+// On our bezier patch, we need to calculate a set of points
+// from the u and v parametric range of 0,0 to 1,1. This calculate
+// function performs that evaluation by using the specified u
+// and v parametric coordinates.
+//
+Point Calculate(float u, float v) {
+
+	// first of all we will need to evaluate 4 curves in the u
+	// direction. The points from those will be stored in this
+	// temporary array
+	Point temp[4];
+
+	// calculate each point on our final v curve
+	temp[0] = CalculateU(u, 0);
+	temp[1] = CalculateU(u, 1);
+	temp[2] = CalculateU(u, 2);
+	temp[3] = CalculateU(u, 3);
+
+	// having got 4 points, we can use it as a bezier curve
+	// to calculate the v direction. This should give us our
+	// final point
+	//
+	return CalculateV(v, temp);
+}
+
+
+void drawBezier3D() {
+	Point *points = new Point[LevelOfDetail*LevelOfDetail];
+
+	glColor3f(1, 0, 1);
+	glPointSize(4);
+	glBegin(GL_POINTS);
+
+	// use the parametric time value 0 to 1
+	for(int i = 0; i != LevelOfDetail; ++i) {
+		//std::cout << " i : " << i << std::endl;
+
+		// calculate the parametric u value
+		float u = (float) i / (LevelOfDetail - 1);
+
+		for(int j = 0; j != LevelOfDetail; ++j) {
+			//std::cout << " j : " << j << std::endl;
+
+			// calculate the parametric v value
+			float v = (float) j / (LevelOfDetail - 1);
+
+			// calculate the point on the surface
+			Point p = Calculate(u, v);
+			points[i*LevelOfDetail + j] = p;
+
+			// draw point
+			if(surfaceType != 2) {
+				glVertex3f(p.x, p.y, p.z);
+			}
+			//std::cout << "(" << p.x << ", " << p.y << ", " << p.z << ")" << std::endl;
+		}
+	}
+	glEnd();
+
+	switch(surfaceType) {
+	case 0:
+		glLineWidth(1.0f);
+		glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+		break;
+	case 1:
+		glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+		break;
+	case 2:
+		glEnable(GL_TEXTURE_2D);
+		glPolygonMode(GL_FRONT, GL_FILL);
+		glBindTexture(GL_TEXTURE_2D, selectedTexture);
+		glColor3f(1.0f, 1.0f, 1.0f);
+		break;
+	}
+
+	for(int z = 0; z < LevelOfDetail - 1; z++) {
+		glBegin(GL_TRIANGLE_STRIP);
+		for(int x = 0; x < LevelOfDetail; x++) {
+			glTexCoord2d(x, z);
+			glVertex3f(points[x*LevelOfDetail + z].x, points[x*LevelOfDetail + z].y, points[x*LevelOfDetail + z].z);
+			glTexCoord2d(x, z + 1);
+			glVertex3f(points[x*LevelOfDetail + z + 1].x, points[x*LevelOfDetail + z + 1].y, points[x*LevelOfDetail + z + 1].z);
+		}
+		glEnd();
+	}
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	// Draw control points
+	glColor3f(1, 1, 0);
+	glPointSize(6);
+	glBegin(GL_POINTS);
+	for(int i = 0; i < 4; i++) {
+		for(int j = 0; j < 4; j++) {
+			glVertex3f(Points[i][j].x, Points[i][j].y, Points[i][j].z);
+		}
+	}
+	glEnd();
+
+	// Draw selected control point
+	if(selectedPointIndex != -1) {
+		glPointSize(10);
 		glBegin(GL_POINTS);
-		for(auto &p : line.getPoints())
-			glVertex2f(p.getX(), p.getY());
+		glVertex3f(selectedPoint.x, selectedPoint.y, selectedPoint.z);
 		glEnd();
 	}
-	if(line.getPoints().size() > 2) {
-		color_rgb c = line.getColor();
-		glColor3f(c._r, c._g, c._b);		// Sets the drawing color
-		drawBezier(pas, line);
-	}
+
+	delete[] points;
 }
-
-void write() {
-	char* truc;
-	if(creationState == selectPoint) {
-		truc = "Selecting point";
-	}
-	else if(creationState == waitingForFirstClick || creationState == waitingForNextClick) {
-		truc = "Drawing lines";
-	}
-	else {
-		truc = "Unknown action";
-	}
-	glRasterPos2f(5, 20);
-
-	for(int i = 0; truc[i] != '\0'; i++)
-		glutBitmapCharacter(GLUT_BITMAP_9_BY_15, truc[i]);
-}
-
-void translate(int xOffset, int yOffset) {
-
-	float x, y;
-
-	float matrix[6] = {
-		1, 0, xOffset,
-		0, 1, yOffset
-	};
-
-	std::vector<Point>& points = currentLine->getPoints();
-	for(unsigned int i = 0; i < points.size(); i++) {
-		x = points.at(i).getX();
-		y = points.at(i).getY();
-
-		points.at(i).setX((x * matrix[0]) + (y * matrix[1]) + (1 * matrix[2]));
-		points.at(i).setY((x * matrix[3]) + (y * matrix[4]) + (1 * matrix[5]));
-	}
-}
-
-void scale(float scaleX, float scaleY) {
-
-	if(scaleX == 0.0f) {
-		scaleX = 1.0f;
-	}
-	if(scaleY == 0.0f) {
-		scaleY = 1.0f;
-	}
-
-	float x, y;
-
-	float matrix[4] = {
-		scaleX, 0,
-		0, scaleY
-	};
-
-	float sumX = 0;
-	float sumY = 0;
-
-	//Calcul du barycentre pour décaler
-	std::vector<Point>& points = currentLine->getPoints();
-	for(unsigned int i = 0; i < points.size(); i++) {
-		sumX += points.at(i).getX();
-		sumY += points.at(i).getY();
-	}
-
-	Point barycenter = {sumX / currentLine->getPoints().size(), sumY / currentLine->getPoints().size()};
-
-	for(unsigned int i = 0; i < points.size(); i++) {
-		// Translate barycenter to origin
-		points.at(i).setX(points.at(i).getX() - barycenter.getX());
-		points.at(i).setY(points.at(i).getY() - barycenter.getY());
-
-		x = points.at(i).getX();
-		y = points.at(i).getY();
-
-		// Scale
-		points.at(i).setX((x * matrix[0]) + (y * matrix[1]));
-		points.at(i).setY((x * matrix[2]) + (y * matrix[3]));
-
-		// Translation back
-		points.at(i).setX(points.at(i).getX() + barycenter.getX());
-		points.at(i).setY(points.at(i).getY() + barycenter.getY());
-	}
-}
-
-void rotate(float angle) {
-
-	float x, y;
-	float cos_angle = cos(angle);
-	float sin_angle = sin(angle);
-
-	float matrix[4] = {
-		cos_angle, -sin_angle,
-		sin_angle, cos_angle
-	};
-
-	float sumX = 0;
-	float sumY = 0;
-
-	//Calcul du barycentre pour décaler
-	std::vector<Point>& points = currentLine->getPoints();
-	for(unsigned int i = 0; i < points.size(); i++) {
-		sumX += points.at(i).getX();
-		sumY += points.at(i).getY();
-	}
-
-	Point barycenter = {sumX / points.size(), sumY / points.size()};
-
-	for(unsigned int i = 0; i < points.size(); i++) {
-
-		// Translate barycenter to origin
-		points.at(i).setX(points.at(i).getX() - barycenter.getX());
-		points.at(i).setY(points.at(i).getY() - barycenter.getY());
-
-		x = points.at(i).getX();
-		y = points.at(i).getY();
-
-		// Rotation around origin
-		points.at(i).setX((x * matrix[0]) + (y * matrix[1]));
-		points.at(i).setY((x * matrix[2]) + (y * matrix[3]));
-
-		// Translation back
-		points.at(i).setX(points.at(i).getX() + barycenter.getX());
-		points.at(i).setY(points.at(i).getY() + barycenter.getY());
-	}
-}
+/////////////////////////////////////////////////////////////////////////////////
